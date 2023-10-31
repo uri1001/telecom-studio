@@ -1,6 +1,6 @@
 # The Telecom Studio
 
-Network diagnostics and information theory toolkit. Zero external dependencies -- pure Python stdlib.
+Network diagnostics, home networking, and security toolkit. Zero external dependencies -- pure Python stdlib.
 
 ## Quick Start
 
@@ -18,6 +18,9 @@ No install, no virtualenv. Requires Python 3.8+.
 | `network/scanner.py` | Port and service discovery | `scan_port`, `scan_common_ports`, `service_fingerprint`, `detect_os` |
 | `network/performance.py` | Network metrics | `measure_latency`, `bandwidth_test`, `packet_loss_test`, `jitter_analysis`, `mtu_discovery` |
 | `network/http.py` | HTTP/TLS testing | `http_get`, `https_verify`, `check_headers_security` |
+| `network/home.py` | Home network tools | `discover_lan_devices`, `gateway_health`, `check_connectivity`, `dns_benchmark`, `network_summary` |
+| `security/password.py` | Password analysis | `analyze_strength`, `estimate_crack_time`, `check_known_patterns`, `generate_passphrase` |
+| `security/network.py` | Network security | `arp_table_analysis`, `rogue_dhcp_detection`, `open_port_audit`, `security_audit` |
 | `theory/entropy.py` | Information theory | `calculate_entropy`, `file_entropy`, `is_random` |
 | `theory/error.py` | Error correction | `hamming_distance`, `add_parity_bit`, `check_parity` |
 | `theory/huffman.py` | Compression | `huffman_encode`, `huffman_decode`, `compression_ratio` |
@@ -29,6 +32,9 @@ No install, no virtualenv. Requires Python 3.8+.
 - **ICMP fallback** -- latency measurement retries via subprocess ping when socket-level probes fail.
 - **Security scoring** -- `check_headers_security()` scores 0-100% across HSTS, CSP, X-Frame-Options, and more.
 - **Cross-platform** -- ping, traceroute, and MTU discovery auto-detect Windows vs Linux flags.
+- **Layer-by-layer diagnosis** -- `check_connectivity()` tests gateway, DNS, and internet sequentially to pinpoint failures.
+- **ARP anomaly detection** -- `arp_table_analysis()` detects duplicate MACs and IP conflicts for spoofing detection.
+- **Password entropy** -- `estimate_crack_time()` reports brute-force time at online, CPU, and GPU attack speeds.
 
 ## Return Format
 
@@ -57,6 +63,42 @@ result = http.https_verify('https://example.com')
 
 # security header audit
 result = http.check_headers_security('https://example.com')
+```
+
+```python
+from src.network import home
+
+# one-shot connectivity diagnosis (gateway -> DNS -> internet)
+result = home.check_connectivity()
+
+# discover all devices on LAN
+result = home.discover_lan_devices()
+
+# full network overview
+result = home.network_summary()
+
+# compare DNS server speeds
+result = home.dns_benchmark()
+```
+
+```python
+from src.security import password, network
+
+# password strength analysis
+result = password.analyze_strength('MyP@ssw0rd!')
+result = password.estimate_crack_time('MyP@ssw0rd!')
+
+# generate secure passphrase
+result = password.generate_passphrase(word_count=5)
+
+# home network security audit
+result = network.security_audit()
+
+# check for ARP spoofing
+result = network.arp_table_analysis()
+
+# audit exposed ports
+result = network.open_port_audit()
 ```
 
 ```python
