@@ -4,7 +4,9 @@ qos.py - VoIP Quality of Service Estimation
 ITU-T G.107 E-model implementation for MOS scoring.
 """
 
-from typing import Dict, Any
+import time
+from typing import Dict, List, Any
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
 # codec parameters: equipment impairment (ie), packet loss robustness (bpl), bitrate
@@ -99,6 +101,139 @@ def estimate_mos(latency_ms: float, jitter_ms: float, packet_loss_pct: float,
     }
 
 
+def voip_quality_report(host: str, codec: str = 'G.711', samples: int = 10,
+                        timeout: float = 2.0) -> Dict[str, Any]:
+    """
+    Full VoIP quality assessment against a host.
+
+    Args:
+        host: Target hostname or IP
+        codec: Codec to evaluate
+        samples: Number of measurement samples
+        timeout: Timeout per measurement
+
+    Returns:
+        Dict with measurements, quality score, and recommendation
+    """
+    from src.network.performance import measure_latency, jitter_analysis
+
+    latency_result = measure_latency(host, samples=samples, timeout=timeout)
+    if latency_result['status'] != 'success':
+        return {
+            'status': 'error',
+            'host': host,
+            'error': latency_result.get('error', 'Latency measurement failed'),
+        }
+
+    jitter_result = jitter_analysis(host, samples=samples, interval=0.1)
+    if jitter_result['status'] != 'success':
+        return {
+            'status': 'error',
+            'host': host,
+            'error': jitter_result.get('error', 'Jitter analysis failed'),
+        }
+
+    latency_ms = latency_result['avg_ms']
+    jitter_ms = jitter_result['avg_jitter_ms']
+    packet_loss_pct = latency_result['packet_loss']
+
+    mos_result = estimate_mos(latency_ms, jitter_ms, packet_loss_pct, codec)
+
+    recommendation = _build_recommendation(
+        mos_result['mos'], latency_ms, jitter_ms, packet_loss_pct
+    )
+
+    return {
+        'status': 'success',
+        'host': host,
+        'codec': codec,
+        'measurements': {
+            'latency_ms': latency_ms,
+            'jitter_ms': jitter_ms,
+            'packet_loss_pct': packet_loss_pct,
+        },
+        'quality': {
+            'r_factor': mos_result['r_factor'],
+            'mos': mos_result['mos'],
+            'tier': mos_result['quality'],
+        },
+        'recommendation': recommendation,
+    }
+
+
+def _build_recommendation(mos: float, latency: float, jitter: float,
+                          loss: float) -> str:
+    """Build a human-readable recommendation based on quality metrics."""
+    if mos >= 4.0:
+        return 'link quality is good for VoIP'
+
+    issues = []
+    if latency > 150:
+        issues.append(f'high latency ({latency:.0f}ms > 150ms)')
+    if jitter > 30:
+        issues.append(f'high jitter ({jitter:.0f}ms > 30ms)')
+    if loss > 3:
+        issues.append(f'high packet loss ({loss:.1f}% > 3%)')
+
+    if issues:
+        return 'issues detected: ' + '; '.join(issues)
+    if mos >= 3.6:
+        return 'acceptable quality'
+    return 'poor link quality'
+
+
+def compare_routes(hosts: List[str], codec: str = 'G.711',
+                   samples: int = 5) -> Dict[str, Any]:
+    """
+    Compare VoIP quality across multiple routes in parallel.
+
+    Args:
+        hosts: List of target hostnames or IPs
+        codec: Codec to evaluate
+        samples: Number of measurement samples per host
+
+    Returns:
+        Dict with ranked route comparison
+    """
+    results = {}
+
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {
+            executor.submit(voip_quality_report, host, codec, samples): host
+            for host in hosts
+        }
+
+        for future in as_completed(futures):
+            host = futures[future]
+            results[host] = future.result()
+
+    routes = []
+    for host, result in results.items():
+        if result['status'] == 'success':
+            routes.append({
+                'host': host,
+                'mos': result['quality']['mos'],
+                'r_factor': result['quality']['r_factor'],
+                'quality': result['quality']['tier'],
+                'latency_ms': result['measurements']['latency_ms'],
+                'jitter_ms': result['measurements']['jitter_ms'],
+                'packet_loss_pct': result['measurements']['packet_loss_pct'],
+            })
+
+    # sort by MOS descending, assign rank
+    routes.sort(key=lambda r: r['mos'], reverse=True)
+    for i, route in enumerate(routes):
+        route['rank'] = i + 1
+
+    return {
+        'status': 'success',
+        'codec': codec,
+        'routes': routes,
+        'best_route': routes[0]['host'] if routes else None,
+        'worst_route': routes[-1]['host'] if routes else None,
+    }
+
+
 if __name__ == '__main__':
     print("VoIP Quality Estimation (ITU-T G.107 E-model)")
     print("=" * 50)
@@ -112,3 +247,13 @@ if __name__ == '__main__':
     result = estimate_mos(200, 30, 5)
     print(f"\nDegraded (200ms, 30ms jitter, 5% loss, G.711):")
     print(f"  MOS: {result['mos']} ({result['quality']}), R: {result['r_factor']}")
+
+    # voip quality report
+    print(f"\nVoIP quality report for google.com:")
+    report = voip_quality_report('google.com', samples=5)
+    if report['status'] == 'success':
+        q = report['quality']
+        print(f"  MOS: {q['mos']} ({q['tier']}), R: {q['r_factor']}")
+        print(f"  Recommendation: {report['recommendation']}")
+    else:
+        print(f"  Error: {report.get('error')}")
