@@ -234,6 +234,106 @@ def compare_routes(hosts: List[str], codec: str = 'G.711',
     }
 
 
+def monitor_quality(host: str, duration: int = 300, interval: int = 30,
+                    codec: str = 'G.711', threshold: float = 3.5) -> Dict[str, Any]:
+    """
+    Continuously monitor VoIP quality over a time window.
+
+    Args:
+        host: Target hostname or IP
+        duration: Total monitoring duration in seconds
+        interval: Seconds between measurements
+        codec: Codec to evaluate
+        threshold: MOS threshold for breach detection
+
+    Returns:
+        Dict with timeline, stats, and threshold breaches
+    """
+    import statistics
+    from src.network.performance import measure_latency, jitter_analysis
+
+    timeline = []
+    breaches = []
+    in_breach = False
+    breach_start = None
+    breach_min_mos = None
+
+    elapsed = 0
+    while elapsed < duration:
+        # quick measurements
+        lat = measure_latency(host, samples=3, timeout=2.0)
+        jit = jitter_analysis(host, samples=5, interval=0.1)
+
+        if lat['status'] == 'success' and jit['status'] == 'success':
+            latency_ms = lat['avg_ms']
+            jitter_ms = jit['avg_jitter_ms']
+            packet_loss_pct = lat['packet_loss']
+
+            mos_result = estimate_mos(latency_ms, jitter_ms, packet_loss_pct, codec)
+            mos = mos_result['mos']
+
+            entry = {
+                'timestamp': time.time(),
+                'mos': mos,
+                'latency_ms': latency_ms,
+                'jitter_ms': jitter_ms,
+                'packet_loss_pct': packet_loss_pct,
+            }
+            timeline.append(entry)
+
+            # breach tracking
+            if mos < threshold and not in_breach:
+                in_breach = True
+                breach_start = entry['timestamp']
+                breach_min_mos = mos
+            elif mos < threshold and in_breach:
+                breach_min_mos = min(breach_min_mos, mos)
+            elif mos >= threshold and in_breach:
+                breaches.append({
+                    'start': breach_start,
+                    'end': entry['timestamp'],
+                    'duration_s': round(entry['timestamp'] - breach_start, 1),
+                    'min_mos': breach_min_mos,
+                })
+                in_breach = False
+
+        elapsed += interval
+        if elapsed < duration:
+            time.sleep(interval)
+
+    # close any open breach
+    if in_breach and timeline:
+        breaches.append({
+            'start': breach_start,
+            'end': timeline[-1]['timestamp'],
+            'duration_s': round(timeline[-1]['timestamp'] - breach_start, 1),
+            'min_mos': breach_min_mos,
+        })
+
+    # aggregate stats
+    mos_values = [e['mos'] for e in timeline]
+    stats = {}
+    if mos_values:
+        stats = {
+            'min': min(mos_values),
+            'max': max(mos_values),
+            'avg': round(statistics.mean(mos_values), 2),
+            'stdev': round(statistics.stdev(mos_values), 2) if len(mos_values) > 1 else 0,
+        }
+
+    return {
+        'status': 'success',
+        'host': host,
+        'codec': codec,
+        'duration_s': duration,
+        'samples': len(timeline),
+        'threshold': threshold,
+        'stats': stats,
+        'breaches': breaches,
+        'timeline': timeline,
+    }
+
+
 if __name__ == '__main__':
     print("VoIP Quality Estimation (ITU-T G.107 E-model)")
     print("=" * 50)
@@ -257,3 +357,11 @@ if __name__ == '__main__':
         print(f"  Recommendation: {report['recommendation']}")
     else:
         print(f"  Error: {report.get('error')}")
+
+    # short monitoring demo
+    print(f"\nMonitoring google.com (60s, 15s interval):")
+    mon = monitor_quality('google.com', duration=60, interval=15, threshold=3.5)
+    if mon['status'] == 'success':
+        print(f"  Samples: {mon['samples']}, Breaches: {len(mon['breaches'])}")
+        if mon['stats']:
+            print(f"  MOS avg: {mon['stats']['avg']}, min: {mon['stats']['min']}")
