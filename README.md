@@ -19,6 +19,7 @@ No install, no virtualenv. Requires Python 3.8+.
 | `network/performance.py` | Network metrics | `measure_latency`, `bandwidth_test`, `packet_loss_test`, `jitter_analysis`, `mtu_discovery` |
 | `network/http.py` | HTTP/TLS testing | `http_get`, `https_verify`, `check_headers_security` |
 | `network/home.py` | Home network tools | `discover_lan_devices`, `gateway_health`, `check_connectivity`, `dns_benchmark`, `network_summary` |
+| `network/qos.py` | VoIP quality scoring | `estimate_mos`, `voip_quality_report`, `monitor_quality`, `compare_routes` |
 | `security/password.py` | Password analysis | `analyze_strength`, `estimate_crack_time`, `check_known_patterns`, `generate_passphrase` |
 | `security/network.py` | Network security | `arp_table_analysis`, `rogue_dhcp_detection`, `open_port_audit`, `security_audit` |
 | `theory/entropy.py` | Information theory | `calculate_entropy`, `file_entropy`, `is_random` |
@@ -35,6 +36,7 @@ No install, no virtualenv. Requires Python 3.8+.
 - **Layer-by-layer diagnosis** -- `check_connectivity()` tests gateway, DNS, and internet sequentially to pinpoint failures.
 - **ARP anomaly detection** -- `arp_table_analysis()` detects duplicate MACs and IP conflicts for spoofing detection.
 - **Password entropy** -- `estimate_crack_time()` reports brute-force time at online, CPU, and GPU attack speeds.
+- **VoIP quality scoring** -- ITU-T G.107 E-model for 7 codecs. `monitor_quality()` tracks MOS over time with threshold breach detection.
 
 ## Return Format
 
@@ -79,6 +81,22 @@ result = home.network_summary()
 
 # compare DNS server speeds
 result = home.dns_benchmark()
+```
+
+```python
+from src.network import qos
+
+# estimate MOS from pre-measured values
+result = qos.estimate_mos(latency_ms=50, jitter_ms=5, packet_loss_pct=1.0, codec='G.711')
+
+# full VoIP quality report
+result = qos.voip_quality_report('pbx.example.com', codec='G.729')
+
+# monitor quality over 5 minutes
+result = qos.monitor_quality('pbx.example.com', duration=300, interval=30, threshold=3.5)
+
+# compare routes in parallel
+result = qos.compare_routes(['route1.example.com', 'route2.example.com'], codec='Opus')
 ```
 
 ```python
