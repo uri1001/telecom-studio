@@ -1,12 +1,32 @@
 #!/usr/bin/env python3
 """
 subnet.py - Subnet and IP Calculator
-CIDR parsing, host enumeration, and network information.
+CIDR parsing, host enumeration, IP classification, and network information.
 """
 
 import ipaddress
 
 from typing import Any, Dict, List, Optional, Tuple
+
+
+# IPv4 bogon ranges per RFC 5735/6890
+BOGON_RANGES = [
+    '0.0.0.0/8',
+    '10.0.0.0/8',
+    '100.64.0.0/10',
+    '127.0.0.0/8',
+    '169.254.0.0/16',
+    '172.16.0.0/12',
+    '192.0.0.0/24',
+    '192.0.2.0/24',
+    '192.168.0.0/16',
+    '198.18.0.0/15',
+    '198.51.100.0/24',
+    '203.0.113.0/24',
+    '224.0.0.0/4',
+    '240.0.0.0/4',
+    '255.255.255.255/32',
+]
 
 
 def _parse_network(cidr: str) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
@@ -156,6 +176,154 @@ def nth_host(cidr: str, n: int) -> Dict[str, Any]:
         return {'status': 'error', 'error': str(e)}
 
 
+def _parse_address(ip: str) -> Tuple[Optional[Any], Optional[Dict[str, Any]]]:
+    """Parse IP address string into address object.
+
+    Args:
+        ip: IP address string (e.g. '192.168.1.1')
+
+    Returns:
+        Tuple of (address_object, error_dict) -- one is always None
+    """
+    try:
+        addr = ipaddress.ip_address(ip)
+        return addr, None
+    except (ValueError, TypeError) as e:
+        return None, {'status': 'error', 'error': f'invalid IP address: {e}'}
+
+
+def is_private(ip: str) -> Dict[str, Any]:
+    """Check if an IP address is in a private range.
+
+    Args:
+        ip: IP address string
+
+    Returns:
+        Dict with is_private boolean
+    """
+    try:
+        addr, err = _parse_address(ip)
+        if err:
+            return err
+
+        return {
+            'status': 'success',
+            'ip': str(addr),
+            'is_private': addr.is_private,
+            'ip_version': addr.version,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def is_reserved(ip: str) -> Dict[str, Any]:
+    """Check if an IP address is in a reserved range.
+
+    Args:
+        ip: IP address string
+
+    Returns:
+        Dict with is_reserved boolean
+    """
+    try:
+        addr, err = _parse_address(ip)
+        if err:
+            return err
+
+        return {
+            'status': 'success',
+            'ip': str(addr),
+            'is_reserved': addr.is_reserved,
+            'ip_version': addr.version,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def classify_ip(ip: str) -> Dict[str, Any]:
+    """Classify an IP address by type.
+
+    Args:
+        ip: IP address string
+
+    Returns:
+        Dict with classification and is_global flag
+    """
+    try:
+        addr, err = _parse_address(ip)
+        if err:
+            return err
+
+        if addr.is_unspecified:
+            classification = 'unspecified'
+        elif addr.is_loopback:
+            classification = 'loopback'
+        elif addr.is_link_local:
+            classification = 'link_local'
+        elif addr.is_multicast:
+            classification = 'multicast'
+        elif addr.is_reserved:
+            classification = 'reserved'
+        elif addr.is_private:
+            classification = 'private'
+        else:
+            classification = 'public'
+
+        return {
+            'status': 'success',
+            'ip': str(addr),
+            'classification': classification,
+            'is_global': addr.is_global,
+            'ip_version': addr.version,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def is_bogon(ip: str) -> Dict[str, Any]:
+    """Check if an IP address is a bogon (non-routable).
+
+    Args:
+        ip: IP address string
+
+    Returns:
+        Dict with is_bogon boolean and matched_range if applicable
+    """
+    try:
+        addr, err = _parse_address(ip)
+        if err:
+            return err
+
+        if addr.version == 4:
+            for bogon_cidr in BOGON_RANGES:
+                bogon_net = ipaddress.ip_network(bogon_cidr)
+                if addr in bogon_net:
+                    return {
+                        'status': 'success',
+                        'ip': str(addr),
+                        'is_bogon': True,
+                        'matched_range': bogon_cidr,
+                        'ip_version': 4,
+                    }
+            return {
+                'status': 'success',
+                'ip': str(addr),
+                'is_bogon': False,
+                'ip_version': 4,
+            }
+        else:
+            # IPv6: use is_global as proxy
+            is_bogon_v6 = not addr.is_global
+            return {
+                'status': 'success',
+                'ip': str(addr),
+                'is_bogon': is_bogon_v6,
+                'ip_version': 6,
+            }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -198,5 +366,33 @@ if __name__ == '__main__':
     result = nth_host('10.0.0.0/24', 0)
     assert result['status'] == 'error'
     print("error handling: pass")
+
+    # ip classification
+    result = classify_ip('192.168.1.1')
+    assert result['classification'] == 'private'
+    result = classify_ip('8.8.8.8')
+    assert result['classification'] == 'public'
+    result = classify_ip('127.0.0.1')
+    assert result['classification'] == 'loopback'
+    result = classify_ip('169.254.1.1')
+    assert result['classification'] == 'link_local'
+    print("classify_ip: pass")
+
+    # bogon detection
+    result = is_bogon('10.0.0.1')
+    assert result['is_bogon'] is True
+    assert result['matched_range'] == '10.0.0.0/8'
+    result = is_bogon('8.8.8.8')
+    assert result['is_bogon'] is False
+    result = is_bogon('192.168.1.1')
+    assert result['is_bogon'] is True
+    print("is_bogon: pass")
+
+    # private / reserved
+    result = is_private('10.0.0.1')
+    assert result['is_private'] is True
+    result = is_reserved('240.0.0.1')
+    assert result['is_reserved'] is True
+    print("is_private/is_reserved: pass")
 
     print("\nall tests passed")

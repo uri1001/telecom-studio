@@ -13,6 +13,10 @@ from src.network.subnet import (
     subnet_info,
     contains,
     nth_host,
+    classify_ip,
+    is_bogon,
+    is_private,
+    is_reserved,
 )
 
 
@@ -150,6 +154,129 @@ class TestNthHost(unittest.TestCase):
 
     def test_slash32_n2_error(self):
         result = nth_host('10.0.0.5/32', 2)
+        self.assertEqual(result['status'], 'error')
+
+
+class TestClassifyIp(unittest.TestCase):
+    """tests for classify_ip()"""
+
+    def test_loopback(self):
+        result = classify_ip('127.0.0.1')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['classification'], 'loopback')
+
+    def test_private_192(self):
+        result = classify_ip('192.168.1.1')
+        self.assertEqual(result['classification'], 'private')
+
+    def test_private_10(self):
+        result = classify_ip('10.0.0.1')
+        self.assertEqual(result['classification'], 'private')
+
+    def test_public(self):
+        result = classify_ip('8.8.8.8')
+        self.assertEqual(result['classification'], 'public')
+        self.assertTrue(result['is_global'])
+
+    def test_link_local(self):
+        result = classify_ip('169.254.1.1')
+        self.assertEqual(result['classification'], 'link_local')
+
+    def test_multicast(self):
+        result = classify_ip('224.0.0.1')
+        self.assertEqual(result['classification'], 'multicast')
+
+    def test_unspecified(self):
+        result = classify_ip('0.0.0.0')
+        self.assertEqual(result['classification'], 'unspecified')
+
+    def test_reserved(self):
+        result = classify_ip('240.0.0.1')
+        self.assertEqual(result['classification'], 'reserved')
+
+    def test_invalid_ip_returns_error(self):
+        result = classify_ip('not-an-ip')
+        self.assertEqual(result['status'], 'error')
+
+    def test_ipv6_loopback(self):
+        result = classify_ip('::1')
+        self.assertEqual(result['classification'], 'loopback')
+        self.assertEqual(result['ip_version'], 6)
+
+
+class TestIsBogon(unittest.TestCase):
+    """tests for is_bogon()"""
+
+    def test_10_is_bogon(self):
+        result = is_bogon('10.0.0.1')
+        self.assertEqual(result['status'], 'success')
+        self.assertTrue(result['is_bogon'])
+        self.assertEqual(result['matched_range'], '10.0.0.0/8')
+
+    def test_8888_not_bogon(self):
+        result = is_bogon('8.8.8.8')
+        self.assertFalse(result['is_bogon'])
+
+    def test_192168_is_bogon(self):
+        result = is_bogon('192.168.1.1')
+        self.assertTrue(result['is_bogon'])
+        self.assertEqual(result['matched_range'], '192.168.0.0/16')
+
+    def test_ipv6_global_not_bogon(self):
+        result = is_bogon('2001:4860:4860::8888')
+        self.assertEqual(result['status'], 'success')
+        self.assertFalse(result['is_bogon'])
+        self.assertEqual(result['ip_version'], 6)
+
+    def test_127_is_bogon(self):
+        result = is_bogon('127.0.0.1')
+        self.assertTrue(result['is_bogon'])
+        self.assertEqual(result['matched_range'], '127.0.0.0/8')
+
+    def test_ipv6_link_local_is_bogon(self):
+        result = is_bogon('fe80::1')
+        self.assertTrue(result['is_bogon'])
+
+
+class TestIsPrivate(unittest.TestCase):
+    """tests for is_private()"""
+
+    def test_10_network(self):
+        result = is_private('10.0.0.1')
+        self.assertEqual(result['status'], 'success')
+        self.assertTrue(result['is_private'])
+
+    def test_172_16_network(self):
+        result = is_private('172.16.0.1')
+        self.assertTrue(result['is_private'])
+
+    def test_192_168_network(self):
+        result = is_private('192.168.0.1')
+        self.assertTrue(result['is_private'])
+
+    def test_public_not_private(self):
+        result = is_private('8.8.8.8')
+        self.assertFalse(result['is_private'])
+
+    def test_invalid_ip_returns_error(self):
+        result = is_private('invalid')
+        self.assertEqual(result['status'], 'error')
+
+
+class TestIsReserved(unittest.TestCase):
+    """tests for is_reserved()"""
+
+    def test_240_is_reserved(self):
+        result = is_reserved('240.0.0.1')
+        self.assertEqual(result['status'], 'success')
+        self.assertTrue(result['is_reserved'])
+
+    def test_public_not_reserved(self):
+        result = is_reserved('8.8.8.8')
+        self.assertFalse(result['is_reserved'])
+
+    def test_invalid_ip_returns_error(self):
+        result = is_reserved('bad')
         self.assertEqual(result['status'], 'error')
 
 
