@@ -17,6 +17,9 @@ from src.network.subnet import (
     is_bogon,
     is_private,
     is_reserved,
+    split_subnet,
+    overlap,
+    adjacent,
 )
 
 
@@ -278,6 +281,88 @@ class TestIsReserved(unittest.TestCase):
     def test_invalid_ip_returns_error(self):
         result = is_reserved('bad')
         self.assertEqual(result['status'], 'error')
+
+
+class TestSplitSubnet(unittest.TestCase):
+    """tests for split_subnet()"""
+
+    def test_slash24_into_slash26(self):
+        result = split_subnet('10.0.0.0/24', 26)
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['count'], 4)
+        self.assertEqual(result['subnets'][0], '10.0.0.0/26')
+        self.assertEqual(result['subnets'][3], '10.0.0.192/26')
+
+    def test_new_prefix_smaller_than_current_error(self):
+        result = split_subnet('10.0.0.0/24', 20)
+        self.assertEqual(result['status'], 'error')
+
+    def test_new_prefix_equal_to_current_error(self):
+        result = split_subnet('10.0.0.0/24', 24)
+        self.assertEqual(result['status'], 'error')
+
+    def test_prefix_exceeds_32_error(self):
+        result = split_subnet('10.0.0.0/24', 33)
+        self.assertEqual(result['status'], 'error')
+
+    def test_safety_cap_65536(self):
+        # /8 into /25 = 2^17 = 131072 > 65536
+        result = split_subnet('10.0.0.0/8', 25)
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('65536', result['error'])
+
+    def test_slash24_into_slash25(self):
+        result = split_subnet('10.0.0.0/24', 25)
+        self.assertEqual(result['count'], 2)
+
+
+class TestOverlap(unittest.TestCase):
+    """tests for overlap()"""
+
+    def test_overlapping_subnets(self):
+        result = overlap('10.0.0.0/24', '10.0.0.128/25')
+        self.assertEqual(result['status'], 'success')
+        self.assertTrue(result['overlaps'])
+        self.assertIn('intersection', result)
+
+    def test_non_overlapping_subnets(self):
+        result = overlap('10.0.0.0/24', '10.0.1.0/24')
+        self.assertEqual(result['status'], 'success')
+        self.assertFalse(result['overlaps'])
+        self.assertNotIn('intersection', result)
+
+    def test_identical_subnets_overlap(self):
+        result = overlap('10.0.0.0/24', '10.0.0.0/24')
+        self.assertTrue(result['overlaps'])
+        self.assertEqual(result['intersection'], ['10.0.0.0/24'])
+
+    def test_invalid_cidr_error(self):
+        result = overlap('bad', '10.0.0.0/24')
+        self.assertEqual(result['status'], 'error')
+
+
+class TestAdjacent(unittest.TestCase):
+    """tests for adjacent()"""
+
+    def test_adjacent_subnets(self):
+        result = adjacent('10.0.0.0/24', '10.0.1.0/24')
+        self.assertEqual(result['status'], 'success')
+        self.assertTrue(result['adjacent'])
+        self.assertIn('merged', result)
+        self.assertEqual(result['merged'], ['10.0.0.0/23'])
+
+    def test_non_adjacent_subnets(self):
+        result = adjacent('10.0.0.0/24', '10.0.2.0/24')
+        self.assertFalse(result['adjacent'])
+        self.assertNotIn('merged', result)
+
+    def test_reversed_order_still_adjacent(self):
+        result = adjacent('10.0.1.0/24', '10.0.0.0/24')
+        self.assertTrue(result['adjacent'])
+
+    def test_same_subnet_not_adjacent(self):
+        result = adjacent('10.0.0.0/24', '10.0.0.0/24')
+        self.assertFalse(result['adjacent'])
 
 
 

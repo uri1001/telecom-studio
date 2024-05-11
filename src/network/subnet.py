@@ -324,6 +324,136 @@ def is_bogon(ip: str) -> Dict[str, Any]:
         return {'status': 'error', 'error': str(e)}
 
 
+def split_subnet(cidr: str, new_prefix: int) -> Dict[str, Any]:
+    """Split a subnet into smaller subnets.
+
+    Args:
+        cidr: CIDR notation string
+        new_prefix: New prefix length (must be larger than current)
+
+    Returns:
+        Dict with list of resulting subnets
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+
+        if new_prefix <= net.prefixlen:
+            return {
+                'status': 'error',
+                'error': f'new prefix /{new_prefix} must be larger than current /{net.prefixlen}',
+            }
+
+        max_prefix = 128 if net.version == 6 else 32
+        if new_prefix > max_prefix:
+            return {
+                'status': 'error',
+                'error': f'prefix /{new_prefix} exceeds maximum /{max_prefix}',
+            }
+
+        # safety cap
+        count = 2 ** (new_prefix - net.prefixlen)
+        if count > 65536:
+            return {
+                'status': 'error',
+                'error': f'would produce {count} subnets (max 65536)',
+            }
+
+        subnets = [str(s) for s in net.subnets(new_prefix=new_prefix)]
+        return {
+            'status': 'success',
+            'parent': str(net),
+            'subnets': subnets,
+            'count': len(subnets),
+            'new_prefix': new_prefix,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def overlap(cidr_a: str, cidr_b: str) -> Dict[str, Any]:
+    """Check if two subnets overlap.
+
+    Args:
+        cidr_a: First CIDR notation string
+        cidr_b: Second CIDR notation string
+
+    Returns:
+        Dict with overlap status and intersection details
+    """
+    try:
+        net_a, err = _parse_network(cidr_a)
+        if err:
+            return err
+        net_b, err = _parse_network(cidr_b)
+        if err:
+            return err
+
+        overlaps = net_a.overlaps(net_b)
+        result = {
+            'status': 'success',
+            'cidr_a': str(net_a),
+            'cidr_b': str(net_b),
+            'overlaps': overlaps,
+        }
+
+        if overlaps:
+            # compute intersection range
+            first = max(int(net_a.network_address), int(net_b.network_address))
+            last = min(int(net_a.broadcast_address), int(net_b.broadcast_address))
+            addr_cls = ipaddress.IPv4Address if net_a.version == 4 else ipaddress.IPv6Address
+            intersection = list(
+                ipaddress.summarize_address_range(addr_cls(first), addr_cls(last))
+            )
+            result['intersection'] = [str(n) for n in intersection]
+
+        return result
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def adjacent(cidr_a: str, cidr_b: str) -> Dict[str, Any]:
+    """Check if two subnets are adjacent (contiguous).
+
+    Args:
+        cidr_a: First CIDR notation string
+        cidr_b: Second CIDR notation string
+
+    Returns:
+        Dict with adjacency status and merged CIDR if applicable
+    """
+    try:
+        net_a, err = _parse_network(cidr_a)
+        if err:
+            return err
+        net_b, err = _parse_network(cidr_b)
+        if err:
+            return err
+
+        bcast_a = int(net_a.broadcast_address)
+        net_b_int = int(net_b.network_address)
+        bcast_b = int(net_b.broadcast_address)
+        net_a_int = int(net_a.network_address)
+
+        is_adjacent = (bcast_a + 1 == net_b_int) or (bcast_b + 1 == net_a_int)
+
+        result = {
+            'status': 'success',
+            'cidr_a': str(net_a),
+            'cidr_b': str(net_b),
+            'adjacent': is_adjacent,
+        }
+
+        if is_adjacent:
+            merged = list(ipaddress.collapse_addresses([net_a, net_b]))
+            result['merged'] = [str(n) for n in merged]
+
+        return result
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -394,5 +524,27 @@ if __name__ == '__main__':
     result = is_reserved('240.0.0.1')
     assert result['is_reserved'] is True
     print("is_private/is_reserved: pass")
+
+    # subnet splitting
+    result = split_subnet('10.0.0.0/24', 26)
+    assert result['count'] == 4
+    assert result['subnets'][0] == '10.0.0.0/26'
+    result = split_subnet('10.0.0.0/24', 20)
+    assert result['status'] == 'error'
+    print("split_subnet: pass")
+
+    # overlap detection
+    result = overlap('10.0.0.0/24', '10.0.0.128/25')
+    assert result['overlaps'] is True
+    result = overlap('10.0.0.0/24', '10.0.1.0/24')
+    assert result['overlaps'] is False
+    print("overlap: pass")
+
+    # adjacency
+    result = adjacent('10.0.0.0/24', '10.0.1.0/24')
+    assert result['adjacent'] is True
+    result = adjacent('10.0.0.0/24', '10.0.2.0/24')
+    assert result['adjacent'] is False
+    print("adjacent: pass")
 
     print("\nall tests passed")
