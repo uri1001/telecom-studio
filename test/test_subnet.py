@@ -20,6 +20,7 @@ from src.network.subnet import (
     split_subnet,
     overlap,
     adjacent,
+    vlsm_allocate,
 )
 
 
@@ -363,6 +364,43 @@ class TestAdjacent(unittest.TestCase):
     def test_same_subnet_not_adjacent(self):
         result = adjacent('10.0.0.0/24', '10.0.0.0/24')
         self.assertFalse(result['adjacent'])
+
+
+class TestVlsmAllocate(unittest.TestCase):
+    """tests for vlsm_allocate()"""
+
+    def test_basic_allocation(self):
+        result = vlsm_allocate('10.0.0.0/24', [100, 50, 25])
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(len(result['allocations']), 3)
+
+    def test_each_allocation_has_enough_hosts(self):
+        result = vlsm_allocate('10.0.0.0/24', [100, 50, 25])
+        for alloc in result['allocations']:
+            self.assertGreaterEqual(alloc['usable_hosts'], alloc['hosts_requested'])
+
+    def test_utilization_present(self):
+        result = vlsm_allocate('10.0.0.0/24', [100, 50, 25])
+        self.assertIn('utilization_pct', result)
+        self.assertGreater(result['utilization_pct'], 0)
+
+    def test_empty_requirements_error(self):
+        result = vlsm_allocate('10.0.0.0/24', [])
+        self.assertEqual(result['status'], 'error')
+
+    def test_zero_hosts_error(self):
+        result = vlsm_allocate('10.0.0.0/24', [0])
+        self.assertEqual(result['status'], 'error')
+
+    def test_insufficient_space_error(self):
+        result = vlsm_allocate('10.0.0.0/28', [100])
+        self.assertEqual(result['status'], 'error')
+
+    def test_original_order_preserved(self):
+        result = vlsm_allocate('10.0.0.0/24', [10, 100, 50])
+        self.assertEqual(result['allocations'][0]['hosts_requested'], 10)
+        self.assertEqual(result['allocations'][1]['hosts_requested'], 100)
+        self.assertEqual(result['allocations'][2]['hosts_requested'], 50)
 
 
 

@@ -5,6 +5,7 @@ CIDR parsing, host enumeration, IP classification, and network information.
 """
 
 import ipaddress
+import math
 
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -454,6 +455,91 @@ def adjacent(cidr_a: str, cidr_b: str) -> Dict[str, Any]:
         return {'status': 'error', 'error': str(e)}
 
 
+def vlsm_allocate(cidr: str, requirements: List[int]) -> Dict[str, Any]:
+    """Allocate subnets using VLSM for variable host requirements.
+
+    Args:
+        cidr: Parent CIDR notation string
+        requirements: List of required host counts per subnet
+
+    Returns:
+        Dict with allocation list, per-subnet waste, and total utilization
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+
+        if not requirements:
+            return {'status': 'error', 'error': 'empty requirements list'}
+
+        max_prefix = 128 if net.version == 6 else 32
+
+        # sort largest first for optimal packing
+        sorted_reqs = sorted(enumerate(requirements), key=lambda x: x[1], reverse=True)
+
+        allocations = []
+        current_addr = int(net.network_address)
+        parent_end = int(net.broadcast_address)
+        total_allocated = 0
+
+        for orig_idx, hosts_needed in sorted_reqs:
+            if hosts_needed < 1:
+                return {'status': 'error', 'error': f'requirement must be >= 1, got {hosts_needed}'}
+
+            # calculate prefix: need hosts + network + broadcast
+            prefix = max_prefix - math.ceil(math.log2(hosts_needed + 2))
+            prefix = max(0, min(max_prefix, prefix))
+
+            subnet_size = 2 ** (max_prefix - prefix)
+
+            # align to subnet boundary
+            if current_addr % subnet_size != 0:
+                current_addr = ((current_addr // subnet_size) + 1) * subnet_size
+
+            subnet_end = current_addr + subnet_size - 1
+
+            if subnet_end > parent_end:
+                return {
+                    'status': 'error',
+                    'error': f'insufficient space for {hosts_needed} hosts at /{prefix}',
+                }
+
+            addr_cls = ipaddress.IPv4Address if net.version == 4 else ipaddress.IPv6Address
+            subnet_cidr = f'{addr_cls(current_addr)}/{prefix}'
+            usable = subnet_size - 2 if prefix < max_prefix else 1
+            waste = usable - hosts_needed
+
+            allocations.append({
+                'original_index': orig_idx,
+                'hosts_requested': hosts_needed,
+                'subnet': subnet_cidr,
+                'prefix': prefix,
+                'usable_hosts': usable,
+                'waste': waste,
+            })
+
+            total_allocated += subnet_size
+            current_addr = subnet_end + 1
+
+        # restore original order
+        allocations.sort(key=lambda x: x['original_index'])
+
+        total_parent = net.num_addresses
+        utilization_pct = round((total_allocated / total_parent) * 100, 2)
+
+        return {
+            'status': 'success',
+            'parent': str(net),
+            'allocations': allocations,
+            'total_allocated': total_allocated,
+            'total_available': total_parent,
+            'utilization_pct': utilization_pct,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -546,5 +632,14 @@ if __name__ == '__main__':
     result = adjacent('10.0.0.0/24', '10.0.2.0/24')
     assert result['adjacent'] is False
     print("adjacent: pass")
+
+    # vlsm allocation
+    result = vlsm_allocate('10.0.0.0/24', [100, 50, 25])
+    assert result['status'] == 'success'
+    assert len(result['allocations']) == 3
+    # largest gets /25 (126 usable), medium gets /26 (62 usable), smallest /27 (30 usable)
+    for alloc in result['allocations']:
+        assert alloc['usable_hosts'] >= alloc['hosts_requested']
+    print(f"vlsm_allocate: {result['utilization_pct']}% utilization")
 
     print("\nall tests passed")
