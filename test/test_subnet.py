@@ -21,6 +21,9 @@ from src.network.subnet import (
     overlap,
     adjacent,
     vlsm_allocate,
+    summarize,
+    wildcard_mask,
+    supernet,
 )
 
 
@@ -401,6 +404,76 @@ class TestVlsmAllocate(unittest.TestCase):
         self.assertEqual(result['allocations'][0]['hosts_requested'], 10)
         self.assertEqual(result['allocations'][1]['hosts_requested'], 100)
         self.assertEqual(result['allocations'][2]['hosts_requested'], 50)
+
+
+class TestSummarize(unittest.TestCase):
+    """tests for summarize()"""
+
+    def test_two_contiguous_slash24s(self):
+        result = summarize(['10.0.0.0/24', '10.0.1.0/24'])
+        self.assertEqual(result['status'], 'success')
+        self.assertIn('10.0.0.0/23', result['summary'])
+        self.assertEqual(result['reduction'], 1)
+
+    def test_empty_list_error(self):
+        result = summarize([])
+        self.assertEqual(result['status'], 'error')
+
+    def test_single_cidr_no_reduction(self):
+        result = summarize(['10.0.0.0/24'])
+        self.assertEqual(result['reduction'], 0)
+        self.assertEqual(result['summary'], ['10.0.0.0/24'])
+
+    def test_non_contiguous_no_reduction(self):
+        result = summarize(['10.0.0.0/24', '10.0.2.0/24'])
+        self.assertEqual(result['output_count'], 2)
+        self.assertEqual(result['reduction'], 0)
+
+
+class TestWildcardMask(unittest.TestCase):
+    """tests for wildcard_mask()"""
+
+    def test_slash24(self):
+        result = wildcard_mask('192.168.1.0/24')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['wildcard_mask'], '0.0.0.255')
+
+    def test_slash32(self):
+        result = wildcard_mask('10.0.0.1/32')
+        self.assertEqual(result['wildcard_mask'], '0.0.0.0')
+
+    def test_slash16(self):
+        result = wildcard_mask('10.0.0.0/16')
+        self.assertEqual(result['wildcard_mask'], '0.0.255.255')
+
+    def test_invalid_cidr(self):
+        result = wildcard_mask('invalid')
+        self.assertEqual(result['status'], 'error')
+
+
+class TestSupernet(unittest.TestCase):
+    """tests for supernet()"""
+
+    def test_slash24_to_slash16(self):
+        result = supernet('10.0.0.0/24', 16)
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['supernet'], '10.0.0.0/16')
+
+    def test_prefix_gte_current_error(self):
+        result = supernet('10.0.0.0/24', 28)
+        self.assertEqual(result['status'], 'error')
+
+    def test_prefix_equal_current_error(self):
+        result = supernet('10.0.0.0/24', 24)
+        self.assertEqual(result['status'], 'error')
+
+    def test_negative_prefix_error(self):
+        result = supernet('10.0.0.0/24', -1)
+        self.assertEqual(result['status'], 'error')
+
+    def test_slash24_to_slash23(self):
+        result = supernet('10.0.0.0/24', 23)
+        self.assertEqual(result['supernet'], '10.0.0.0/23')
 
 
 

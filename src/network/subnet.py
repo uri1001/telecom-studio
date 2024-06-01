@@ -540,6 +540,107 @@ def vlsm_allocate(cidr: str, requirements: List[int]) -> Dict[str, Any]:
         return {'status': 'error', 'error': str(e)}
 
 
+def summarize(cidrs: List[str]) -> Dict[str, Any]:
+    """Summarize a list of CIDRs into the smallest set of covering networks.
+
+    Args:
+        cidrs: List of CIDR notation strings
+
+    Returns:
+        Dict with summarized CIDR list and reduction count
+    """
+    try:
+        if not cidrs:
+            return {'status': 'error', 'error': 'empty CIDR list'}
+
+        v4_nets = []
+        v6_nets = []
+        for cidr in cidrs:
+            net, err = _parse_network(cidr)
+            if err:
+                return err
+            if net.version == 4:
+                v4_nets.append(net)
+            else:
+                v6_nets.append(net)
+
+        collapsed = []
+        if v4_nets:
+            collapsed.extend(ipaddress.collapse_addresses(v4_nets))
+        if v6_nets:
+            collapsed.extend(ipaddress.collapse_addresses(v6_nets))
+
+        summary = [str(n) for n in collapsed]
+        return {
+            'status': 'success',
+            'input_count': len(cidrs),
+            'summary': summary,
+            'output_count': len(summary),
+            'reduction': len(cidrs) - len(summary),
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def wildcard_mask(cidr: str) -> Dict[str, Any]:
+    """Get the wildcard (inverse) mask for a CIDR.
+
+    Args:
+        cidr: CIDR notation string
+
+    Returns:
+        Dict with wildcard mask (Cisco ACL format)
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+
+        return {
+            'status': 'success',
+            'cidr': str(net),
+            'netmask': str(net.netmask),
+            'wildcard_mask': str(net.hostmask),
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def supernet(cidr: str, new_prefix: int) -> Dict[str, Any]:
+    """Get the supernet for a CIDR.
+
+    Args:
+        cidr: CIDR notation string
+        new_prefix: New prefix length (must be smaller than current)
+
+    Returns:
+        Dict with supernet CIDR
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+
+        if new_prefix >= net.prefixlen:
+            return {
+                'status': 'error',
+                'error': f'new prefix /{new_prefix} must be smaller than current /{net.prefixlen}',
+            }
+
+        if new_prefix < 0:
+            return {'status': 'error', 'error': f'invalid prefix /{new_prefix}'}
+
+        parent = net.supernet(new_prefix=new_prefix)
+        return {
+            'status': 'success',
+            'cidr': str(net),
+            'supernet': str(parent),
+            'new_prefix': new_prefix,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -641,5 +742,23 @@ if __name__ == '__main__':
     for alloc in result['allocations']:
         assert alloc['usable_hosts'] >= alloc['hosts_requested']
     print(f"vlsm_allocate: {result['utilization_pct']}% utilization")
+
+    # summarization
+    result = summarize(['10.0.0.0/24', '10.0.1.0/24'])
+    assert '10.0.0.0/23' in result['summary']
+    assert result['reduction'] == 1
+    print("summarize: pass")
+
+    # wildcard mask
+    result = wildcard_mask('192.168.1.0/24')
+    assert result['wildcard_mask'] == '0.0.0.255'
+    print("wildcard_mask: pass")
+
+    # supernet
+    result = supernet('10.0.0.0/24', 16)
+    assert result['supernet'] == '10.0.0.0/16'
+    result = supernet('10.0.0.0/24', 28)
+    assert result['status'] == 'error'
+    print("supernet: pass")
 
     print("\nall tests passed")
