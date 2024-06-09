@@ -641,6 +641,97 @@ def supernet(cidr: str, new_prefix: int) -> Dict[str, Any]:
         return {'status': 'error', 'error': str(e)}
 
 
+def exclude(cidr: str, exclude_cidr: str) -> Dict[str, Any]:
+    """Exclude a subnet from a larger network.
+
+    Args:
+        cidr: Parent CIDR notation string
+        exclude_cidr: CIDR to exclude
+
+    Returns:
+        Dict with remaining subnets after exclusion
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+        exclude_net, err = _parse_network(exclude_cidr)
+        if err:
+            return err
+
+        remaining = [str(n) for n in net.address_exclude(exclude_net)]
+        return {
+            'status': 'success',
+            'parent': str(net),
+            'excluded': str(exclude_net),
+            'remaining': remaining,
+            'count': len(remaining),
+        }
+    except ValueError as e:
+        return {'status': 'error', 'error': str(e)}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def cidr_to_range(cidr: str) -> Dict[str, Any]:
+    """Convert a CIDR to its IP range.
+
+    Args:
+        cidr: CIDR notation string
+
+    Returns:
+        Dict with first_ip, last_ip, and total_addresses
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+
+        return {
+            'status': 'success',
+            'cidr': str(net),
+            'first_ip': str(net.network_address),
+            'last_ip': str(net.broadcast_address),
+            'total_addresses': net.num_addresses,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def range_to_cidrs(start_ip: str, end_ip: str) -> Dict[str, Any]:
+    """Convert an IP range to a list of CIDRs.
+
+    Args:
+        start_ip: Start IP address
+        end_ip: End IP address
+
+    Returns:
+        Dict with list of covering CIDRs
+    """
+    try:
+        start, err = _parse_address(start_ip)
+        if err:
+            return err
+        end, err = _parse_address(end_ip)
+        if err:
+            return err
+
+        cidrs = [str(n) for n in ipaddress.summarize_address_range(start, end)]
+        return {
+            'status': 'success',
+            'start_ip': str(start),
+            'end_ip': str(end),
+            'cidrs': cidrs,
+            'count': len(cidrs),
+        }
+    except ValueError as e:
+        return {'status': 'error', 'error': str(e)}
+    except TypeError as e:
+        return {'status': 'error', 'error': f'version mismatch: {e}'}
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -760,5 +851,22 @@ if __name__ == '__main__':
     result = supernet('10.0.0.0/24', 28)
     assert result['status'] == 'error'
     print("supernet: pass")
+
+    # exclusion
+    result = exclude('10.0.0.0/24', '10.0.0.0/25')
+    assert '10.0.0.128/25' in result['remaining']
+    print("exclude: pass")
+
+    # cidr to range
+    result = cidr_to_range('192.168.0.0/24')
+    assert result['first_ip'] == '192.168.0.0'
+    assert result['last_ip'] == '192.168.0.255'
+    assert result['total_addresses'] == 256
+    print("cidr_to_range: pass")
+
+    # range to cidrs
+    result = range_to_cidrs('192.168.0.0', '192.168.1.255')
+    assert '192.168.0.0/23' in result['cidrs']
+    print("range_to_cidrs: pass")
 
     print("\nall tests passed")

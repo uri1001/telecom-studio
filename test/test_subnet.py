@@ -24,6 +24,9 @@ from src.network.subnet import (
     summarize,
     wildcard_mask,
     supernet,
+    exclude,
+    cidr_to_range,
+    range_to_cidrs,
 )
 
 
@@ -474,6 +477,67 @@ class TestSupernet(unittest.TestCase):
     def test_slash24_to_slash23(self):
         result = supernet('10.0.0.0/24', 23)
         self.assertEqual(result['supernet'], '10.0.0.0/23')
+
+
+class TestExclude(unittest.TestCase):
+    """tests for exclude()"""
+
+    def test_exclude_slash25_from_slash24(self):
+        result = exclude('192.168.1.0/24', '192.168.1.0/25')
+        self.assertEqual(result['status'], 'success')
+        self.assertIn('192.168.1.128/25', result['remaining'])
+        self.assertEqual(result['count'], 1)
+
+    def test_exclude_produces_multiple_remainders(self):
+        result = exclude('10.0.0.0/24', '10.0.0.64/26')
+        self.assertEqual(result['status'], 'success')
+        self.assertGreater(result['count'], 1)
+
+    def test_exclude_non_contained_error(self):
+        result = exclude('192.168.1.0/24', '10.0.0.0/24')
+        self.assertEqual(result['status'], 'error')
+
+
+class TestCidrToRange(unittest.TestCase):
+    """tests for cidr_to_range()"""
+
+    def test_slash24_range(self):
+        result = cidr_to_range('192.168.1.0/24')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['first_ip'], '192.168.1.0')
+        self.assertEqual(result['last_ip'], '192.168.1.255')
+        self.assertEqual(result['total_addresses'], 256)
+
+    def test_slash32_range(self):
+        result = cidr_to_range('10.0.0.5/32')
+        self.assertEqual(result['first_ip'], '10.0.0.5')
+        self.assertEqual(result['last_ip'], '10.0.0.5')
+        self.assertEqual(result['total_addresses'], 1)
+
+    def test_invalid_cidr(self):
+        result = cidr_to_range('bad')
+        self.assertEqual(result['status'], 'error')
+
+
+class TestRangeToCidrs(unittest.TestCase):
+    """tests for range_to_cidrs()"""
+
+    def test_contiguous_range_to_slash23(self):
+        result = range_to_cidrs('192.168.0.0', '192.168.1.255')
+        self.assertEqual(result['status'], 'success')
+        self.assertIn('192.168.0.0/23', result['cidrs'])
+
+    def test_single_ip_range(self):
+        result = range_to_cidrs('10.0.0.1', '10.0.0.1')
+        self.assertEqual(result['cidrs'], ['10.0.0.1/32'])
+
+    def test_invalid_start_ip(self):
+        result = range_to_cidrs('bad', '10.0.0.1')
+        self.assertEqual(result['status'], 'error')
+
+    def test_reversed_range_error(self):
+        result = range_to_cidrs('10.0.0.10', '10.0.0.1')
+        self.assertEqual(result['status'], 'error')
 
 
 
