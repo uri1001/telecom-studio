@@ -732,6 +732,141 @@ def range_to_cidrs(start_ip: str, end_ip: str) -> Dict[str, Any]:
         return {'status': 'error', 'error': str(e)}
 
 
+def _mac_to_eui64(mac: str) -> Tuple[Optional[str], Optional[str]]:
+    """Convert MAC address to EUI-64 interface identifier.
+
+    Args:
+        mac: MAC address string (various formats)
+
+    Returns:
+        Tuple of (eui64_hex, error_string) -- one is always None
+    """
+    # strip common separators
+    cleaned = mac.replace(':', '').replace('-', '').replace('.', '').lower()
+
+    if len(cleaned) != 12 or not all(c in '0123456789abcdef' for c in cleaned):
+        return None, f'invalid MAC address: {mac}'
+
+    # insert ff:fe in the middle
+    oui = cleaned[:6]
+    nic = cleaned[6:]
+    eui64 = oui[:2] + oui[2:4] + oui[4:6] + 'fffe' + nic
+
+    # flip bit 7 (universal/local bit) in the first byte
+    first_byte = int(eui64[:2], 16) ^ 0x02
+    eui64 = f'{first_byte:02x}' + eui64[2:]
+
+    # format as colon-separated groups of 4
+    formatted = ':'.join(eui64[i:i+4] for i in range(0, 16, 4))
+    return formatted, None
+
+
+def expand_ipv6(address: str) -> Dict[str, Any]:
+    """Expand an IPv6 address to its full form.
+
+    Args:
+        address: IPv6 address string
+
+    Returns:
+        Dict with expanded (exploded) IPv6 address
+    """
+    try:
+        addr, err = _parse_address(address)
+        if err:
+            return err
+
+        if addr.version != 6:
+            return {'status': 'error', 'error': f'not an IPv6 address: {address}'}
+
+        return {
+            'status': 'success',
+            'input': address,
+            'expanded': addr.exploded,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def compress_ipv6(address: str) -> Dict[str, Any]:
+    """Compress an IPv6 address to its shortest form.
+
+    Args:
+        address: IPv6 address string
+
+    Returns:
+        Dict with compressed IPv6 address
+    """
+    try:
+        addr, err = _parse_address(address)
+        if err:
+            return err
+
+        if addr.version != 6:
+            return {'status': 'error', 'error': f'not an IPv6 address: {address}'}
+
+        return {
+            'status': 'success',
+            'input': address,
+            'compressed': str(addr),
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def eui64_address(prefix: str, mac: str) -> Dict[str, Any]:
+    """Generate an IPv6 address from a /64 prefix and MAC address using EUI-64.
+
+    Args:
+        prefix: IPv6 /64 prefix in CIDR notation
+        mac: MAC address string
+
+    Returns:
+        Dict with generated IPv6 address
+    """
+    try:
+        net, err = _parse_network(prefix)
+        if err:
+            return err
+
+        if net.version != 6:
+            return {'status': 'error', 'error': 'prefix must be IPv6'}
+
+        if net.prefixlen != 64:
+            return {'status': 'error', 'error': f'prefix must be /64, got /{net.prefixlen}'}
+
+        eui64_hex, mac_err = _mac_to_eui64(mac)
+        if mac_err:
+            return {'status': 'error', 'error': mac_err}
+
+        # combine upper 64 bits of prefix with eui-64 interface id
+        prefix_int = int(net.network_address) & (((1 << 64) - 1) << 64)
+        iid_clean = eui64_hex.replace(':', '')
+        iid_int = int(iid_clean, 16)
+        full_addr = ipaddress.IPv6Address(prefix_int | iid_int)
+
+        return {
+            'status': 'success',
+            'prefix': str(net),
+            'mac': mac,
+            'eui64_iid': eui64_hex,
+            'address': str(full_addr),
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def link_local(mac: str) -> Dict[str, Any]:
+    """Generate a link-local IPv6 address from a MAC address.
+
+    Args:
+        mac: MAC address string
+
+    Returns:
+        Dict with link-local IPv6 address
+    """
+    return eui64_address('fe80::/64', mac)
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -868,5 +1003,26 @@ if __name__ == '__main__':
     result = range_to_cidrs('192.168.0.0', '192.168.1.255')
     assert '192.168.0.0/23' in result['cidrs']
     print("range_to_cidrs: pass")
+
+    # ipv6 expand/compress
+    result = expand_ipv6('2001:db8::1')
+    assert result['expanded'] == '2001:0db8:0000:0000:0000:0000:0000:0001'
+    result = compress_ipv6('2001:0db8:0000:0000:0000:0000:0000:0001')
+    assert result['compressed'] == '2001:db8::1'
+    result = expand_ipv6('192.168.1.1')
+    assert result['status'] == 'error'
+    print("expand/compress_ipv6: pass")
+
+    # eui-64
+    result = eui64_address('2001:db8::/64', '00:1A:2B:3C:4D:5E')
+    assert result['status'] == 'success'
+    assert 'address' in result
+    print(f"eui64_address: {result['address']}")
+
+    # link-local
+    result = link_local('00:1A:2B:3C:4D:5E')
+    assert result['status'] == 'success'
+    assert result['address'].startswith('fe80::')
+    print(f"link_local: {result['address']}")
 
     print("\nall tests passed")

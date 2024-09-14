@@ -27,6 +27,10 @@ from src.network.subnet import (
     exclude,
     cidr_to_range,
     range_to_cidrs,
+    expand_ipv6,
+    compress_ipv6,
+    eui64_address,
+    link_local,
 )
 
 
@@ -538,6 +542,95 @@ class TestRangeToCidrs(unittest.TestCase):
     def test_reversed_range_error(self):
         result = range_to_cidrs('10.0.0.10', '10.0.0.1')
         self.assertEqual(result['status'], 'error')
+
+
+class TestExpandIpv6(unittest.TestCase):
+    """tests for expand_ipv6()"""
+
+    def test_compressed_address(self):
+        result = expand_ipv6('2001:db8::1')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['expanded'], '2001:0db8:0000:0000:0000:0000:0000:0001')
+
+    def test_ipv4_returns_error(self):
+        result = expand_ipv6('192.168.1.1')
+        self.assertEqual(result['status'], 'error')
+
+    def test_full_address_unchanged(self):
+        full = '2001:0db8:0000:0000:0000:0000:0000:0001'
+        result = expand_ipv6(full)
+        self.assertEqual(result['expanded'], full)
+
+    def test_invalid_address(self):
+        result = expand_ipv6('not-ipv6')
+        self.assertEqual(result['status'], 'error')
+
+
+class TestCompressIpv6(unittest.TestCase):
+    """tests for compress_ipv6()"""
+
+    def test_full_form_compressed(self):
+        result = compress_ipv6('2001:0db8:0000:0000:0000:0000:0000:0001')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['compressed'], '2001:db8::1')
+
+    def test_already_compressed(self):
+        result = compress_ipv6('::1')
+        self.assertEqual(result['compressed'], '::1')
+
+    def test_ipv4_returns_error(self):
+        result = compress_ipv6('10.0.0.1')
+        self.assertEqual(result['status'], 'error')
+
+
+class TestEui64Address(unittest.TestCase):
+    """tests for eui64_address()"""
+
+    def test_valid_mac_and_prefix(self):
+        result = eui64_address('2001:db8::/64', '00:1A:2B:3C:4D:5E')
+        self.assertEqual(result['status'], 'success')
+        self.assertIn('address', result)
+        # result should start with 2001:db8::
+        self.assertTrue(result['address'].startswith('2001:db8::'))
+
+    def test_non_slash64_error(self):
+        result = eui64_address('2001:db8::/48', '00:1A:2B:3C:4D:5E')
+        self.assertEqual(result['status'], 'error')
+        self.assertIn('/64', result['error'])
+
+    def test_non_ipv6_prefix_error(self):
+        result = eui64_address('192.168.1.0/24', '00:1A:2B:3C:4D:5E')
+        self.assertEqual(result['status'], 'error')
+
+    def test_invalid_mac_error(self):
+        result = eui64_address('2001:db8::/64', 'ZZZZ')
+        self.assertEqual(result['status'], 'error')
+
+    def test_hyphen_mac_format(self):
+        result = eui64_address('2001:db8::/64', '00-1A-2B-3C-4D-5E')
+        self.assertEqual(result['status'], 'success')
+
+    def test_dot_mac_format(self):
+        result = eui64_address('2001:db8::/64', '001A.2B3C.4D5E')
+        self.assertEqual(result['status'], 'success')
+
+
+class TestLinkLocal(unittest.TestCase):
+    """tests for link_local()"""
+
+    def test_valid_mac_gives_fe80_prefix(self):
+        result = link_local('00:1A:2B:3C:4D:5E')
+        self.assertEqual(result['status'], 'success')
+        self.assertTrue(result['address'].startswith('fe80::'))
+
+    def test_invalid_mac_error(self):
+        result = link_local('invalid-mac')
+        self.assertEqual(result['status'], 'error')
+
+    def test_different_mac(self):
+        result = link_local('AA:BB:CC:DD:EE:FF')
+        self.assertEqual(result['status'], 'success')
+        self.assertTrue(result['address'].startswith('fe80::'))
 
 
 
