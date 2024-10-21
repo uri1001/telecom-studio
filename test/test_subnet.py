@@ -31,6 +31,8 @@ from src.network.subnet import (
     compress_ipv6,
     eui64_address,
     link_local,
+    ptr_record,
+    arpa_zone,
 )
 
 
@@ -631,6 +633,59 @@ class TestLinkLocal(unittest.TestCase):
         result = link_local('AA:BB:CC:DD:EE:FF')
         self.assertEqual(result['status'], 'success')
         self.assertTrue(result['address'].startswith('fe80::'))
+
+
+class TestPtrRecord(unittest.TestCase):
+    """tests for ptr_record()"""
+
+    def test_ipv4_ptr(self):
+        result = ptr_record('192.168.1.1')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['ptr'], '1.1.168.192.in-addr.arpa')
+
+    def test_ipv6_ptr(self):
+        result = ptr_record('2001:db8::1')
+        self.assertEqual(result['status'], 'success')
+        self.assertTrue(result['ptr'].endswith('.ip6.arpa'))
+
+    def test_invalid_ip(self):
+        result = ptr_record('bad')
+        self.assertEqual(result['status'], 'error')
+
+    def test_loopback_ptr(self):
+        result = ptr_record('127.0.0.1')
+        self.assertEqual(result['ptr'], '1.0.0.127.in-addr.arpa')
+
+
+class TestArpaZone(unittest.TestCase):
+    """tests for arpa_zone()"""
+
+    def test_slash24_single_zone(self):
+        result = arpa_zone('192.168.1.0/24')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['zone_count'], 1)
+        self.assertEqual(result['zones'][0], '1.168.192.in-addr.arpa')
+
+    def test_slash23_gives_2_zones(self):
+        result = arpa_zone('192.168.0.0/23')
+        self.assertEqual(result['zone_count'], 2)
+        self.assertIn('0.168.192.in-addr.arpa', result['zones'])
+        self.assertIn('1.168.192.in-addr.arpa', result['zones'])
+
+    def test_ipv6_zone(self):
+        result = arpa_zone('2001:db8::/32')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['ip_version'], 6)
+        self.assertTrue(result['zones'][0].endswith('.ip6.arpa'))
+
+    def test_slash16_zone(self):
+        result = arpa_zone('10.0.0.0/16')
+        self.assertEqual(result['zone_count'], 1)
+        self.assertEqual(result['zones'][0], '0.10.in-addr.arpa')
+
+    def test_invalid_cidr(self):
+        result = arpa_zone('bad')
+        self.assertEqual(result['status'], 'error')
 
 
 

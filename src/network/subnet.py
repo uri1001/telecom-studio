@@ -867,6 +867,90 @@ def link_local(mac: str) -> Dict[str, Any]:
     return eui64_address('fe80::/64', mac)
 
 
+def ptr_record(ip: str) -> Dict[str, Any]:
+    """Get the reverse DNS PTR record name for an IP address.
+
+    Args:
+        ip: IP address string
+
+    Returns:
+        Dict with PTR record name (.in-addr.arpa or .ip6.arpa)
+    """
+    try:
+        addr, err = _parse_address(ip)
+        if err:
+            return err
+
+        return {
+            'status': 'success',
+            'ip': str(addr),
+            'ptr': addr.reverse_pointer,
+            'ip_version': addr.version,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def arpa_zone(cidr: str) -> Dict[str, Any]:
+    """Get reverse DNS zone(s) for a CIDR block.
+
+    Args:
+        cidr: CIDR notation string
+
+    Returns:
+        Dict with reverse DNS zone name(s)
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+
+        zones = []
+
+        if net.version == 4:
+            prefix = net.prefixlen
+            octets = str(net.network_address).split('.')
+
+            if prefix >= 24:
+                # single zone from first 3 octets
+                zone = f'{octets[2]}.{octets[1]}.{octets[0]}.in-addr.arpa'
+                zones.append(zone)
+            elif prefix == 16:
+                zone = f'{octets[1]}.{octets[0]}.in-addr.arpa'
+                zones.append(zone)
+            elif prefix > 16:
+                num_third_octets = 2 ** (24 - prefix)
+                base_third = int(octets[2])
+                for i in range(num_third_octets):
+                    zone = f'{base_third + i}.{octets[1]}.{octets[0]}.in-addr.arpa'
+                    zones.append(zone)
+            elif prefix >= 8:
+                # zone from first 1-2 octets
+                zone = f'{octets[1]}.{octets[0]}.in-addr.arpa'
+                zones.append(zone)
+            else:
+                zone = f'{octets[0]}.in-addr.arpa'
+                zones.append(zone)
+        else:
+            # IPv6: nibble-based zones
+            expanded = net.network_address.exploded.replace(':', '')
+            # number of nibbles determined by prefix (4 bits per nibble)
+            nibble_count = net.prefixlen // 4
+            nibbles = expanded[:nibble_count]
+            zone = '.'.join(reversed(nibbles)) + '.ip6.arpa'
+            zones.append(zone)
+
+        return {
+            'status': 'success',
+            'cidr': str(net),
+            'zones': zones,
+            'zone_count': len(zones),
+            'ip_version': net.version,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -1024,5 +1108,19 @@ if __name__ == '__main__':
     assert result['status'] == 'success'
     assert result['address'].startswith('fe80::')
     print(f"link_local: {result['address']}")
+
+    # ptr record
+    result = ptr_record('192.168.1.1')
+    assert result['ptr'] == '1.1.168.192.in-addr.arpa'
+    result = ptr_record('2001:db8::1')
+    assert result['ptr'].endswith('.ip6.arpa')
+    print("ptr_record: pass")
+
+    # arpa zone
+    result = arpa_zone('192.168.1.0/24')
+    assert '1.168.192.in-addr.arpa' in result['zones']
+    result = arpa_zone('10.0.0.0/23')
+    assert result['zone_count'] == 2
+    print("arpa_zone: pass")
 
     print("\nall tests passed")
