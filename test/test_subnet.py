@@ -33,6 +33,7 @@ from src.network.subnet import (
     link_local,
     ptr_record,
     arpa_zone,
+    capacity_report,
 )
 
 
@@ -686,6 +687,37 @@ class TestArpaZone(unittest.TestCase):
     def test_invalid_cidr(self):
         result = arpa_zone('bad')
         self.assertEqual(result['status'], 'error')
+
+
+class TestCapacityReport(unittest.TestCase):
+    """tests for capacity_report()"""
+
+    def test_half_allocated(self):
+        result = capacity_report('192.168.0.0/24', ['192.168.0.0/25'])
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['utilization_pct'], 50.0)
+        self.assertEqual(result['free_addresses'], 128)
+        self.assertEqual(result['allocated_addresses'], 128)
+
+    def test_fully_allocated(self):
+        result = capacity_report('10.0.0.0/24', ['10.0.0.0/24'])
+        self.assertEqual(result['utilization_pct'], 100.0)
+        self.assertEqual(result['free_addresses'], 0)
+
+    def test_no_allocations(self):
+        result = capacity_report('10.0.0.0/24', [])
+        self.assertEqual(result['utilization_pct'], 0.0)
+        self.assertEqual(result['free_addresses'], 256)
+
+    def test_allocation_outside_parent_error(self):
+        result = capacity_report('10.0.0.0/24', ['192.168.0.0/24'])
+        self.assertEqual(result['status'], 'error')
+
+    def test_fragmentation_index(self):
+        # two small allocations leaving fragmented free space
+        result = capacity_report('10.0.0.0/24', ['10.0.0.0/26', '10.0.0.128/26'])
+        self.assertEqual(result['status'], 'success')
+        self.assertIn('fragmentation_index', result)
 
 
 

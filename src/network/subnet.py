@@ -951,6 +951,105 @@ def arpa_zone(cidr: str) -> Dict[str, Any]:
         return {'status': 'error', 'error': str(e)}
 
 
+def _find_free_blocks(
+    parent_net: Any, allocated_nets: List[Any]
+) -> List[Any]:
+    """Find free address blocks within a parent network.
+
+    Args:
+        parent_net: Parent network object
+        allocated_nets: List of allocated network objects (must be within parent)
+
+    Returns:
+        List of free network objects
+    """
+    # sort allocations by network address
+    sorted_allocs = sorted(allocated_nets, key=lambda n: int(n.network_address))
+
+    # iteratively exclude allocated blocks from parent
+    free = [parent_net]
+    for alloc in sorted_allocs:
+        new_free = []
+        for block in free:
+            if block.overlaps(alloc):
+                try:
+                    new_free.extend(block.address_exclude(alloc))
+                except ValueError:
+                    new_free.append(block)
+            else:
+                new_free.append(block)
+        free = new_free
+
+    # collapse adjacent free blocks
+    if free:
+        free = list(ipaddress.collapse_addresses(free))
+
+    return free
+
+
+def capacity_report(parent_cidr: str, allocated_cidrs: List[str]) -> Dict[str, Any]:
+    """Generate a capacity report for a network with allocations.
+
+    Args:
+        parent_cidr: Parent CIDR notation string
+        allocated_cidrs: List of allocated subnet CIDRs
+
+    Returns:
+        Dict with utilization metrics and free block analysis
+    """
+    try:
+        parent, err = _parse_network(parent_cidr)
+        if err:
+            return err
+
+        alloc_nets = []
+        for cidr in allocated_cidrs:
+            net, err = _parse_network(cidr)
+            if err:
+                return err
+            if not parent.overlaps(net):
+                return {
+                    'status': 'error',
+                    'error': f'{cidr} is not within {parent_cidr}',
+                }
+            alloc_nets.append(net)
+
+        total = parent.num_addresses
+        allocated = sum(n.num_addresses for n in alloc_nets)
+
+        free_blocks = _find_free_blocks(parent, alloc_nets)
+        free_list = [str(b) for b in free_blocks]
+        free_addresses = sum(b.num_addresses for b in free_blocks)
+
+        # largest free block
+        largest_free = max(free_blocks, key=lambda b: b.num_addresses) if free_blocks else None
+        largest_free_str = str(largest_free) if largest_free else None
+        largest_free_size = largest_free.num_addresses if largest_free else 0
+
+        # fragmentation index: 1 - (largest_free / total_free)
+        if free_addresses > 0:
+            fragmentation = round(1 - (largest_free_size / free_addresses), 2)
+        else:
+            fragmentation = 0.0
+
+        utilization_pct = round((allocated / total) * 100, 2) if total > 0 else 0.0
+
+        return {
+            'status': 'success',
+            'parent': str(parent),
+            'total_addresses': total,
+            'allocated_addresses': allocated,
+            'free_addresses': free_addresses,
+            'utilization_pct': utilization_pct,
+            'free_blocks': free_list,
+            'free_block_count': len(free_list),
+            'fragmentation_index': fragmentation,
+            'largest_free_block': largest_free_str,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -1122,5 +1221,18 @@ if __name__ == '__main__':
     result = arpa_zone('10.0.0.0/23')
     assert result['zone_count'] == 2
     print("arpa_zone: pass")
+
+    # capacity report
+    result = capacity_report('10.0.0.0/24', ['10.0.0.0/25'])
+    assert result['status'] == 'success'
+    assert result['utilization_pct'] == 50.0
+    assert result['free_addresses'] == 128
+    assert '10.0.0.128/25' in result['free_blocks']
+    print(f"capacity_report: {result['utilization_pct']}% used")
+
+    # capacity with multiple allocations
+    result = capacity_report('10.0.0.0/24', ['10.0.0.0/26', '10.0.0.128/26'])
+    assert result['utilization_pct'] == 50.0
+    print("capacity_report multi: pass")
 
     print("\nall tests passed")
