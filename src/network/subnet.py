@@ -1050,6 +1050,87 @@ def capacity_report(parent_cidr: str, allocated_cidrs: List[str]) -> Dict[str, A
         return {'status': 'error', 'error': str(e)}
 
 
+def subnet_diff(old_cidrs: List[str], new_cidrs: List[str]) -> Dict[str, Any]:
+    """Compare two sets of CIDRs and find differences.
+
+    Args:
+        old_cidrs: Previous list of CIDRs
+        new_cidrs: Current list of CIDRs
+
+    Returns:
+        Dict with added, removed, and unchanged CIDRs
+    """
+    try:
+        old_nets = []
+        for cidr in old_cidrs:
+            net, err = _parse_network(cidr)
+            if err:
+                return err
+            old_nets.append(net)
+
+        new_nets = []
+        for cidr in new_cidrs:
+            net, err = _parse_network(cidr)
+            if err:
+                return err
+            new_nets.append(net)
+
+        old_set = set(str(n) for n in old_nets)
+        new_set = set(str(n) for n in new_nets)
+
+        added = sorted(new_set - old_set)
+        removed = sorted(old_set - new_set)
+        unchanged = sorted(old_set & new_set)
+
+        return {
+            'status': 'success',
+            'added': added,
+            'removed': removed,
+            'unchanged': unchanged,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def find_free_subnets(parent_cidr: str, allocated_cidrs: List[str]) -> Dict[str, Any]:
+    """Find unallocated subnets within a parent network.
+
+    Args:
+        parent_cidr: Parent CIDR notation string
+        allocated_cidrs: List of allocated subnet CIDRs
+
+    Returns:
+        Dict with free subnets and statistics
+    """
+    try:
+        parent, err = _parse_network(parent_cidr)
+        if err:
+            return err
+
+        alloc_nets = []
+        for cidr in allocated_cidrs:
+            net, err = _parse_network(cidr)
+            if err:
+                return err
+            alloc_nets.append(net)
+
+        free_blocks = _find_free_blocks(parent, alloc_nets)
+        free_list = [str(b) for b in free_blocks]
+        free_addresses = sum(b.num_addresses for b in free_blocks)
+        largest = max(free_blocks, key=lambda b: b.num_addresses) if free_blocks else None
+
+        return {
+            'status': 'success',
+            'parent': str(parent),
+            'free_subnets': free_list,
+            'free_count': len(free_list),
+            'free_addresses': free_addresses,
+            'largest_free': str(largest) if largest else None,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -1234,5 +1315,21 @@ if __name__ == '__main__':
     result = capacity_report('10.0.0.0/24', ['10.0.0.0/26', '10.0.0.128/26'])
     assert result['utilization_pct'] == 50.0
     print("capacity_report multi: pass")
+
+    # subnet diff
+    result = subnet_diff(
+        ['10.0.0.0/24', '10.0.2.0/24'],
+        ['10.0.0.0/24', '10.0.3.0/24'],
+    )
+    assert '10.0.3.0/24' in result['added']
+    assert '10.0.2.0/24' in result['removed']
+    assert '10.0.0.0/24' in result['unchanged']
+    print("subnet_diff: pass")
+
+    # find free subnets
+    result = find_free_subnets('10.0.0.0/24', ['10.0.0.0/25'])
+    assert '10.0.0.128/25' in result['free_subnets']
+    assert result['free_addresses'] == 128
+    print("find_free_subnets: pass")
 
     print("\nall tests passed")

@@ -34,6 +34,8 @@ from src.network.subnet import (
     ptr_record,
     arpa_zone,
     capacity_report,
+    subnet_diff,
+    find_free_subnets,
 )
 
 
@@ -718,6 +720,70 @@ class TestCapacityReport(unittest.TestCase):
         result = capacity_report('10.0.0.0/24', ['10.0.0.0/26', '10.0.0.128/26'])
         self.assertEqual(result['status'], 'success')
         self.assertIn('fragmentation_index', result)
+
+
+class TestSubnetDiff(unittest.TestCase):
+    """tests for subnet_diff()"""
+
+    def test_added_detected(self):
+        result = subnet_diff(
+            ['10.0.0.0/24'],
+            ['10.0.0.0/24', '10.0.1.0/24']
+        )
+        self.assertEqual(result['status'], 'success')
+        self.assertIn('10.0.1.0/24', result['added'])
+
+    def test_removed_detected(self):
+        result = subnet_diff(
+            ['10.0.0.0/24', '10.0.1.0/24'],
+            ['10.0.0.0/24']
+        )
+        self.assertIn('10.0.1.0/24', result['removed'])
+
+    def test_unchanged_detected(self):
+        result = subnet_diff(
+            ['10.0.0.0/24', '10.0.1.0/24'],
+            ['10.0.0.0/24', '10.0.2.0/24']
+        )
+        self.assertIn('10.0.0.0/24', result['unchanged'])
+
+    def test_identical_sets(self):
+        result = subnet_diff(
+            ['10.0.0.0/24'],
+            ['10.0.0.0/24']
+        )
+        self.assertEqual(result['added'], [])
+        self.assertEqual(result['removed'], [])
+        self.assertEqual(result['unchanged'], ['10.0.0.0/24'])
+
+    def test_empty_both(self):
+        result = subnet_diff([], [])
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['added'], [])
+        self.assertEqual(result['removed'], [])
+
+
+class TestFindFreeSubnets(unittest.TestCase):
+    """tests for find_free_subnets()"""
+
+    def test_half_allocated_returns_free(self):
+        result = find_free_subnets('192.168.0.0/24', ['192.168.0.0/25'])
+        self.assertEqual(result['status'], 'success')
+        self.assertIn('192.168.0.128/25', result['free_subnets'])
+        self.assertEqual(result['free_addresses'], 128)
+
+    def test_fully_allocated_no_free(self):
+        result = find_free_subnets('10.0.0.0/24', ['10.0.0.0/24'])
+        self.assertEqual(result['free_count'], 0)
+
+    def test_no_allocations_all_free(self):
+        result = find_free_subnets('10.0.0.0/24', [])
+        self.assertEqual(result['free_addresses'], 256)
+        self.assertEqual(result['largest_free'], '10.0.0.0/24')
+
+    def test_largest_free_reported(self):
+        result = find_free_subnets('10.0.0.0/24', ['10.0.0.0/26'])
+        self.assertIsNotNone(result['largest_free'])
 
 
 
