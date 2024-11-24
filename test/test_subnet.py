@@ -36,6 +36,9 @@ from src.network.subnet import (
     capacity_report,
     subnet_diff,
     find_free_subnets,
+    random_host,
+    iter_hosts,
+    iter_subnets,
 )
 
 
@@ -784,6 +787,94 @@ class TestFindFreeSubnets(unittest.TestCase):
     def test_largest_free_reported(self):
         result = find_free_subnets('10.0.0.0/24', ['10.0.0.0/26'])
         self.assertIsNotNone(result['largest_free'])
+
+
+class TestRandomHost(unittest.TestCase):
+    """tests for random_host()"""
+
+    def test_result_within_subnet(self):
+        result = random_host('192.168.1.0/24')
+        self.assertEqual(result['status'], 'success')
+        host_addr = ipaddress.ip_address(result['host'])
+        net = ipaddress.ip_network('192.168.1.0/24')
+        self.assertIn(host_addr, net)
+
+    def test_host_not_network_or_broadcast(self):
+        # run several times to increase confidence
+        for _ in range(10):
+            result = random_host('192.168.1.0/24')
+            self.assertNotEqual(result['host'], '192.168.1.0')
+            self.assertNotEqual(result['host'], '192.168.1.255')
+
+    def test_slash32_returns_single_host(self):
+        result = random_host('10.0.0.5/32')
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['host'], '10.0.0.5')
+
+    def test_slash31_returns_one_of_two(self):
+        result = random_host('10.0.0.0/31')
+        self.assertIn(result['host'], ['10.0.0.0', '10.0.0.1'])
+
+    def test_invalid_cidr(self):
+        result = random_host('bad')
+        self.assertEqual(result['status'], 'error')
+
+
+class TestIterHosts(unittest.TestCase):
+    """tests for iter_hosts()"""
+
+    def test_slash28_limit5(self):
+        result = iter_hosts('10.0.0.0/28', limit=5)
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['count'], 5)
+        self.assertTrue(result['truncated'])
+        self.assertEqual(result['total_available'], 14)
+
+    def test_slash30_all_hosts(self):
+        result = iter_hosts('10.0.0.0/30')
+        self.assertEqual(result['count'], 2)
+        self.assertEqual(result['total_available'], 2)
+        self.assertFalse(result['truncated'])
+
+    def test_slash31_gives_2_hosts(self):
+        result = iter_hosts('10.0.0.0/31')
+        self.assertEqual(result['count'], 2)
+        self.assertEqual(result['hosts'], ['10.0.0.0', '10.0.0.1'])
+
+    def test_slash32_gives_1_host(self):
+        result = iter_hosts('10.0.0.5/32')
+        self.assertEqual(result['count'], 1)
+        self.assertEqual(result['hosts'], ['10.0.0.5'])
+
+    def test_default_cap(self):
+        # /16 has 65534 usable, default cap 10000
+        result = iter_hosts('10.0.0.0/16')
+        self.assertEqual(result['count'], 10000)
+        self.assertTrue(result['truncated'])
+
+
+class TestIterSubnets(unittest.TestCase):
+    """tests for iter_subnets()"""
+
+    def test_slash24_into_slash26_limit2(self):
+        result = iter_subnets('10.0.0.0/24', 26, limit=2)
+        self.assertEqual(result['status'], 'success')
+        self.assertEqual(result['count'], 2)
+        self.assertTrue(result['truncated'])
+        self.assertEqual(result['total_subnets'], 4)
+
+    def test_slash24_into_slash26_all(self):
+        result = iter_subnets('10.0.0.0/24', 26)
+        self.assertEqual(result['count'], 4)
+        self.assertFalse(result['truncated'])
+
+    def test_new_prefix_smaller_error(self):
+        result = iter_subnets('10.0.0.0/24', 20)
+        self.assertEqual(result['status'], 'error')
+
+    def test_new_prefix_equal_error(self):
+        result = iter_subnets('10.0.0.0/24', 24)
+        self.assertEqual(result['status'], 'error')
 
 
 

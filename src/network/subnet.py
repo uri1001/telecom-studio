@@ -6,6 +6,7 @@ CIDR parsing, host enumeration, IP classification, and network information.
 
 import ipaddress
 import math
+import secrets
 
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -1131,6 +1132,151 @@ def find_free_subnets(parent_cidr: str, allocated_cidrs: List[str]) -> Dict[str,
         return {'status': 'error', 'error': str(e)}
 
 
+def random_host(cidr: str) -> Dict[str, Any]:
+    """Generate a random usable host address within a subnet.
+
+    Args:
+        cidr: CIDR notation string
+
+    Returns:
+        Dict with randomly selected host address
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+
+        prefix = net.prefixlen
+        max_prefix = 128 if net.version == 6 else 32
+
+        if prefix == max_prefix:
+            # single host
+            return {
+                'status': 'success',
+                'cidr': str(net),
+                'host': str(net.network_address),
+            }
+
+        if net.version == 4 and prefix == 31:
+            # point-to-point: pick 0 or 1
+            offset = secrets.randbelow(2)
+            host = ipaddress.ip_address(int(net.network_address) + offset)
+        else:
+            usable = net.num_addresses - 2
+            if usable < 1:
+                return {'status': 'error', 'error': 'no usable hosts in subnet'}
+            offset = secrets.randbelow(usable) + 1
+            host = ipaddress.ip_address(int(net.network_address) + offset)
+
+        return {
+            'status': 'success',
+            'cidr': str(net),
+            'host': str(host),
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def iter_hosts(cidr: str, limit: Optional[int] = None) -> Dict[str, Any]:
+    """Iterate usable host addresses in a subnet.
+
+    Args:
+        cidr: CIDR notation string
+        limit: Maximum hosts to return (default: 10000 safety cap)
+
+    Returns:
+        Dict with host list, count, and truncation flag
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+
+        cap = limit if limit is not None else 10000
+        prefix = net.prefixlen
+        max_prefix = 128 if net.version == 6 else 32
+
+        # calculate total available
+        if prefix == max_prefix:
+            total_available = 1
+        elif net.version == 4 and prefix == 31:
+            total_available = 2
+        else:
+            total_available = net.num_addresses - 2
+
+        hosts = []
+        if prefix == max_prefix:
+            hosts.append(str(net.network_address))
+        elif net.version == 4 and prefix == 31:
+            for i in range(min(2, cap)):
+                hosts.append(str(ipaddress.ip_address(int(net.network_address) + i)))
+        else:
+            # arithmetic iteration from network_address + 1
+            base = int(net.network_address)
+            count = min(total_available, cap)
+            for i in range(1, count + 1):
+                hosts.append(str(ipaddress.ip_address(base + i)))
+
+        truncated = len(hosts) < total_available
+
+        return {
+            'status': 'success',
+            'cidr': str(net),
+            'hosts': hosts,
+            'count': len(hosts),
+            'truncated': truncated,
+            'total_available': total_available,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
+def iter_subnets(cidr: str, new_prefix: int,
+                 limit: Optional[int] = None) -> Dict[str, Any]:
+    """Iterate subnets within a network.
+
+    Args:
+        cidr: CIDR notation string
+        new_prefix: Prefix length for sub-subnets
+        limit: Maximum subnets to return (default: 10000 safety cap)
+
+    Returns:
+        Dict with subnet list, count, and truncation flag
+    """
+    try:
+        net, err = _parse_network(cidr)
+        if err:
+            return err
+
+        if new_prefix <= net.prefixlen:
+            return {
+                'status': 'error',
+                'error': f'new prefix /{new_prefix} must be larger than /{net.prefixlen}',
+            }
+
+        cap = limit if limit is not None else 10000
+        total = 2 ** (new_prefix - net.prefixlen)
+
+        subnets = []
+        for subnet in net.subnets(new_prefix=new_prefix):
+            if len(subnets) >= cap:
+                break
+            subnets.append(str(subnet))
+
+        truncated = len(subnets) < total
+
+        return {
+            'status': 'success',
+            'cidr': str(net),
+            'subnets': subnets,
+            'count': len(subnets),
+            'truncated': truncated,
+            'total_subnets': total,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -1331,5 +1477,28 @@ if __name__ == '__main__':
     assert '10.0.0.128/25' in result['free_subnets']
     assert result['free_addresses'] == 128
     print("find_free_subnets: pass")
+
+    # random host
+    result = random_host('10.0.0.0/24')
+    assert result['status'] == 'success'
+    addr = ipaddress.ip_address(result['host'])
+    assert addr in ipaddress.ip_network('10.0.0.0/24')
+    print(f"random_host: {result['host']}")
+
+    # iter hosts
+    result = iter_hosts('10.0.0.0/28', limit=5)
+    assert result['count'] == 5
+    assert result['truncated'] is True
+    assert result['total_available'] == 14
+    result = iter_hosts('10.0.0.0/30')
+    assert result['count'] == 2
+    print("iter_hosts: pass")
+
+    # iter subnets
+    result = iter_subnets('10.0.0.0/24', 26, limit=2)
+    assert result['count'] == 2
+    assert result['truncated'] is True
+    assert result['total_subnets'] == 4
+    print("iter_subnets: pass")
 
     print("\nall tests passed")
