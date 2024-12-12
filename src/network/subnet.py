@@ -1277,6 +1277,91 @@ def iter_subnets(cidr: str, new_prefix: int,
         return {'status': 'error', 'error': str(e)}
 
 
+def subnet_map(parent_cidr: str, allocated_cidrs: List[str]) -> Dict[str, Any]:
+    """Generate a visual ASCII map of subnet allocation.
+
+    Args:
+        parent_cidr: Parent CIDR notation string
+        allocated_cidrs: List of allocated subnet CIDRs
+
+    Returns:
+        Dict with ASCII map, block details, and utilization
+    """
+    try:
+        parent, err = _parse_network(parent_cidr)
+        if err:
+            return err
+
+        alloc_nets = []
+        for cidr in allocated_cidrs:
+            net, err = _parse_network(cidr)
+            if err:
+                return err
+            alloc_nets.append(net)
+
+        free_blocks = _find_free_blocks(parent, alloc_nets)
+        total = parent.num_addresses
+
+        # build sorted block list with type labels
+        blocks = []
+        for net in alloc_nets:
+            blocks.append({
+                'cidr': str(net),
+                'type': 'allocated',
+                'addresses': net.num_addresses,
+                'start': int(net.network_address),
+            })
+        for net in free_blocks:
+            blocks.append({
+                'cidr': str(net),
+                'type': 'free',
+                'addresses': net.num_addresses,
+                'start': int(net.network_address),
+            })
+        blocks.sort(key=lambda b: b['start'])
+
+        # render 64-char proportional bar
+        bar_width = 64
+        bar_chars = []
+        for block in blocks:
+            proportion = block['addresses'] / total
+            chars = max(1, round(proportion * bar_width))
+            char = '#' if block['type'] == 'allocated' else '.'
+            bar_chars.append(char * chars)
+
+        bar = ''.join(bar_chars)
+        # trim or pad to exact width
+        bar = bar[:bar_width].ljust(bar_width, '.')
+
+        # build detail lines
+        lines = [f'[{bar}]', '']
+        for block in blocks:
+            pct = round((block['addresses'] / total) * 100, 2)
+            marker = '#' if block['type'] == 'allocated' else '.'
+            lines.append(f'  {marker} {block["cidr"]:<24} {block["addresses"]:>8} addr  {pct:>6}%')
+
+        allocated_total = sum(n.num_addresses for n in alloc_nets)
+        utilization_pct = round((allocated_total / total) * 100, 2) if total > 0 else 0.0
+        lines.append('')
+        lines.append(f'  utilization: {utilization_pct}%')
+
+        map_str = '\n'.join(lines)
+
+        # clean block output (remove start key)
+        for block in blocks:
+            del block['start']
+
+        return {
+            'status': 'success',
+            'parent': str(parent),
+            'map': map_str,
+            'blocks': blocks,
+            'utilization_pct': utilization_pct,
+        }
+    except Exception as e:
+        return {'status': 'error', 'error': str(e)}
+
+
 if __name__ == '__main__':
     # basic subnet info
     result = subnet_info('192.168.1.0/24')
@@ -1500,5 +1585,14 @@ if __name__ == '__main__':
     assert result['truncated'] is True
     assert result['total_subnets'] == 4
     print("iter_subnets: pass")
+
+    # subnet map
+    result = subnet_map('10.0.0.0/24', ['10.0.0.0/26', '10.0.0.64/26'])
+    assert result['status'] == 'success'
+    assert '##' in result['map']
+    assert '..' in result['map']
+    assert result['utilization_pct'] == 50.0
+    print("subnet_map:")
+    print(result['map'])
 
     print("\nall tests passed")

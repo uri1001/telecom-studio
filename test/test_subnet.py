@@ -39,6 +39,7 @@ from src.network.subnet import (
     random_host,
     iter_hosts,
     iter_subnets,
+    subnet_map,
 )
 
 
@@ -874,6 +875,41 @@ class TestIterSubnets(unittest.TestCase):
 
     def test_new_prefix_equal_error(self):
         result = iter_subnets('10.0.0.0/24', 24)
+        self.assertEqual(result['status'], 'error')
+
+
+class TestSubnetMap(unittest.TestCase):
+    """tests for subnet_map()"""
+
+    def test_map_contains_hash_and_dot(self):
+        result = subnet_map('10.0.0.0/24', ['10.0.0.0/25'])
+        self.assertEqual(result['status'], 'success')
+        self.assertIn('#', result['map'])
+        self.assertIn('.', result['map'])
+
+    def test_utilization_correct(self):
+        result = subnet_map('10.0.0.0/24', ['10.0.0.0/25'])
+        self.assertEqual(result['utilization_pct'], 50.0)
+
+    def test_blocks_present(self):
+        result = subnet_map('10.0.0.0/24', ['10.0.0.0/25'])
+        self.assertEqual(len(result['blocks']), 2)
+        types = [b['type'] for b in result['blocks']]
+        self.assertIn('allocated', types)
+        self.assertIn('free', types)
+
+    def test_no_allocations(self):
+        result = subnet_map('10.0.0.0/24', [])
+        self.assertEqual(result['utilization_pct'], 0.0)
+        self.assertIn('.', result['map'])
+
+    def test_full_allocation(self):
+        result = subnet_map('10.0.0.0/24', ['10.0.0.0/24'])
+        self.assertEqual(result['utilization_pct'], 100.0)
+        self.assertIn('#', result['map'])
+
+    def test_invalid_parent(self):
+        result = subnet_map('bad', [])
         self.assertEqual(result['status'], 'error')
 
 
