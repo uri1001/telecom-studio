@@ -20,6 +20,7 @@ No install, no virtualenv. Requires Python 3.8+.
 | `network/http.py` | HTTP/TLS testing | `http_get`, `https_verify`, `check_headers_security` |
 | `network/home.py` | Home network tools | `discover_lan_devices`, `gateway_health`, `check_connectivity`, `dns_benchmark`, `network_summary` |
 | `network/qos.py` | VoIP quality scoring | `estimate_mos`, `voip_quality_report`, `monitor_quality`, `compare_routes` |
+| `network/subnet.py` | IP/subnet calculator | `subnet_info`, `vlsm_allocate`, `capacity_report`, `subnet_map`, `eui64_address` |
 | `security/password.py` | Password analysis | `analyze_strength`, `estimate_crack_time`, `check_known_patterns`, `generate_passphrase` |
 | `security/network.py` | Network security | `arp_table_analysis`, `rogue_dhcp_detection`, `open_port_audit`, `security_audit` |
 | `theory/entropy.py` | Information theory | `calculate_entropy`, `file_entropy`, `is_random` |
@@ -37,6 +38,7 @@ No install, no virtualenv. Requires Python 3.8+.
 - **ARP anomaly detection** -- `arp_table_analysis()` detects duplicate MACs and IP conflicts for spoofing detection.
 - **Password entropy** -- `estimate_crack_time()` reports brute-force time at online, CPU, and GPU attack speeds.
 - **VoIP quality scoring** -- ITU-T G.107 E-model for 7 codecs. `monitor_quality()` tracks MOS over time with threshold breach detection.
+- **Subnet toolkit** -- CIDR parsing, VLSM allocation, capacity reporting, overlap detection, EUI-64 address generation, and visual subnet maps. Supports both IPv4 and IPv6.
 
 ## Return Format
 
@@ -100,6 +102,25 @@ result = qos.compare_routes(['route1.example.com', 'route2.example.com'], codec=
 ```
 
 ```python
+from src.network import subnet
+
+# subnet information (network, broadcast, usable hosts, masks)
+result = subnet.subnet_info('192.168.1.0/24')
+
+# VLSM allocation for variable-sized subnets
+result = subnet.vlsm_allocate('10.0.0.0/24', [100, 50, 25])
+
+# check subnet overlap
+result = subnet.overlap('10.0.0.0/24', '10.0.0.128/25')
+
+# capacity report with utilization and free blocks
+result = subnet.capacity_report('10.0.0.0/16', ['10.0.0.0/20', '10.0.16.0/20'])
+
+# generate IPv6 address from prefix + MAC (EUI-64)
+result = subnet.eui64_address('2001:db8::/64', '00:1A:2B:3C:4D:5E')
+```
+
+```python
 from src.security import password, network
 
 # password strength analysis
@@ -133,6 +154,8 @@ decoded = huffman.huffman_decode(encoded, codes)
 ## Security
 
 Port scanning and network probing require authorization from the target network owner. `scan_network_range()` refuses ranges larger than /24 to prevent accidental mass scanning.
+
+The subnet calculator operates entirely offline with no network access -- all computations use Python's `ipaddress` module.
 
 ## Author
 
