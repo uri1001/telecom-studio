@@ -12,7 +12,7 @@ import urllib.request
 import urllib.error
 
 
-def ping(host, count=4, timeout=1):
+def ping(host: str, count: int = 4, timeout: int = 1) -> dict:
     """Send ICMP ping to a host."""
     try:
         is_windows = platform.system().lower() == 'windows'
@@ -39,6 +39,7 @@ def ping(host, count=4, timeout=1):
                                 packet_loss = float(part.replace('%', ''))
                                 break
 
+            # linux ping summary: "rtt min/avg/max/mdev = ..." -- avg is 5th /-delimited field
             if 'avg' in output or 'Average' in output:
                 for line in output.split('\n'):
                     if 'avg' in line or 'Average' in line:
@@ -63,7 +64,7 @@ def ping(host, count=4, timeout=1):
         }
 
 
-def traceroute(host, max_hops=30):
+def traceroute(host: str, max_hops: int = 30) -> dict:
     """Trace route to destination."""
     try:
         if platform.system().lower() == 'windows':
@@ -109,21 +110,21 @@ def traceroute(host, max_hops=30):
         }
 
 
-def dns_lookup(domain, record_type='A'):
+def dns_lookup(domain: str, record_type: str = 'A') -> dict:
     """Perform DNS lookup using socket (A and AAAA only)."""
     try:
-        record_type = record_type.upper()
+        normalized_type = record_type.upper()
 
-        if record_type == 'A':
+        if normalized_type == 'A':
             family = socket.AF_INET
-        elif record_type == 'AAAA':
+        elif normalized_type == 'AAAA':
             family = socket.AF_INET6
         else:
             return {
                 'status': 'error',
                 'domain': domain,
-                'record_type': record_type,
-                'error': f'Unsupported record type: {record_type}',
+                'record_type': normalized_type,
+                'error': f'Unsupported record type: {normalized_type}',
                 'records': []
             }
 
@@ -134,7 +135,7 @@ def dns_lookup(domain, record_type='A'):
         return {
             'status': 'success',
             'domain': domain,
-            'record_type': record_type,
+            'record_type': normalized_type,
             'records': records,
             'count': len(records)
         }
@@ -148,7 +149,7 @@ def dns_lookup(domain, record_type='A'):
         }
 
 
-def get_public_ip():
+def get_public_ip() -> dict:
     """Get public IP address using external services."""
     services = [
         ('https://api.ipify.org?format=json', 'json'),
@@ -181,7 +182,7 @@ def get_public_ip():
     }
 
 
-def get_local_ips():
+def get_local_ips() -> dict:
     """Get local IP addresses using socket."""
     try:
         # primary IP via UDP connect trick

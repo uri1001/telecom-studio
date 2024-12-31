@@ -145,37 +145,37 @@ class TestEncodeToBytes(unittest.TestCase):
     """Tests for encode_to_bytes()."""
 
     def test_eight_bits(self):
-        result = encode_to_bytes('10000001')
+        result, padding = encode_to_bytes('10000001')
         self.assertEqual(result, bytes([0b10000001]))
+        self.assertEqual(padding, 0)
 
     def test_padding(self):
         # 4 bits -> padded to 8 bits
-        result = encode_to_bytes('1010')
+        result, padding = encode_to_bytes('1010')
         self.assertEqual(len(result), 1)
         # '1010' + '0000' padding = 0b10100000 = 160
         self.assertEqual(result[0], 0b10100000)
+        self.assertEqual(padding, 4)
 
     def test_empty_string(self):
-        result = encode_to_bytes('')
+        result, padding = encode_to_bytes('')
         self.assertEqual(result, b'')
+        self.assertEqual(padding, 0)
 
     def test_sixteen_bits(self):
-        result = encode_to_bytes('1111111100000000')
+        result, padding = encode_to_bytes('1111111100000000')
         self.assertEqual(result, bytes([0xFF, 0x00]))
+        self.assertEqual(padding, 0)
 
-    def test_bug4_padding_info_lost(self):
-        """Bug #4: encode_to_bytes adds padding but doesn't record how many
-        bits were padded. Decoding from bytes cannot reconstruct the exact
-        original bitstring."""
+    def test_padding_info_preserved(self):
+        """encode_to_bytes returns padding count so original bitstring length is recoverable."""
         original_bits = '10101'  # 5 bits
-        packed = encode_to_bytes(original_bits)
-        # unpack back to bits
+        packed, padding = encode_to_bytes(original_bits)
+        # unpack back to bits and strip padding
         unpacked = ''.join(f'{b:08b}' for b in packed)
-        # unpacked is 8 bits, not 5 -- padding info is lost
-        self.assertEqual(len(unpacked), 8)
-        self.assertNotEqual(len(unpacked), len(original_bits))
-        # the first 5 bits match, but we have no way to know it was 5
-        self.assertTrue(unpacked.startswith(original_bits))
+        if padding > 0:
+            unpacked = unpacked[:-padding]
+        self.assertEqual(unpacked, original_bits)
 
 
 if __name__ == '__main__':

@@ -4,8 +4,11 @@ home.py - Home Network Diagnostics
 Day-to-day home network troubleshooting tools using only stdlib.
 """
 
+import json
+import os
 import re
 import socket
+import struct
 import subprocess
 import platform
 import time
@@ -15,60 +18,29 @@ import urllib.error
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Any, Optional
 
-
-def _get_default_gateway() -> Optional[str]:
-    """detect the default gateway ip."""
-    try:
-        if platform.system().lower() == 'windows':
-            result = subprocess.run(
-                ['ipconfig'], capture_output=True, text=True, timeout=5
-            )
-            for line in result.stdout.split('\n'):
-                if 'Default Gateway' in line:
-                    match = re.search(r'(\d+\.\d+\.\d+\.\d+)', line)
-                    if match:
-                        return match.group(1)
-        else:
-            result = subprocess.run(
-                ['ip', 'route', 'show', 'default'],
-                capture_output=True, text=True, timeout=5
-            )
-            match = re.search(r'default via (\d+\.\d+\.\d+\.\d+)', result.stdout)
-            if match:
-                return match.group(1)
-    except Exception:
-        pass
-    return None
-
-
-def _get_primary_ip() -> Optional[str]:
-    """get primary local ip via udp connect trick."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return None
+from src.network._utils import get_default_gateway as _get_default_gateway
+from src.network._utils import get_primary_ip as _get_primary_ip
 
 
 def _ping_host(host: str, timeout: float = 1.0) -> Optional[float]:
-    """ping a single host, return rtt in ms or None if unreachable."""
+    """measure rtt via tcp connect on port 80, with icmp ping fallback. returns ms or None."""
     try:
         start = time.perf_counter()
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
-        result = sock.connect_ex((host, 80))
-        elapsed = (time.perf_counter() - start) * 1000
-        sock.close()
+        try:
+            result = sock.connect_ex((host, 80))
+            elapsed = (time.perf_counter() - start) * 1000
+        finally:
+            sock.close()
 
         if result == 0:
             return round(elapsed, 2)
 
         # fallback to icmp ping
-        param = '-n' if platform.system().lower() == 'windows' else '-c'
-        timeout_flag = '-w' if platform.system().lower() == 'windows' else '-W'
+        is_windows = platform.system().lower() == 'windows'
+        param = '-n' if is_windows else '-c'
+        timeout_flag = '-w' if is_windows else '-W'
         cmd = ['ping', param, '1', timeout_flag, str(int(timeout)), host]
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 2)
 
@@ -201,9 +173,11 @@ def gateway_health(timeout: float = 2.0) -> Dict[str, Any]:
         admin_open = False
         try:
             sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            admin_open = sock.connect_ex((gateway_ip, 80)) == 0
-            sock.close()
+            try:
+                sock.settimeout(timeout)
+                admin_open = sock.connect_ex((gateway_ip, 80)) == 0
+            finally:
+                sock.close()
         except Exception:
             pass
 
@@ -337,7 +311,7 @@ def check_connectivity(timeout: float = 3.0) -> Dict[str, Any]:
             'overall': 'gateway_down'
         }
 
-        # layer 1: gateway
+        # step 1: gateway reachability
         gateway_ip = _get_default_gateway()
         if gateway_ip:
             rtt = _ping_host(gateway_ip, timeout)
@@ -348,7 +322,7 @@ def check_connectivity(timeout: float = 3.0) -> Dict[str, Any]:
             result['overall'] = 'gateway_down'
             return result
 
-        # layer 2: dns
+        # step 2: dns resolution
         try:
             start = time.perf_counter()
             socket.getaddrinfo('google.com', 80)
@@ -358,7 +332,7 @@ def check_connectivity(timeout: float = 3.0) -> Dict[str, Any]:
             result['overall'] = 'dns_issue'
             return result
 
-        # layer 3: internet
+        # step 3: internet access
         try:
             start = time.perf_counter()
             req = urllib.request.Request(
@@ -430,17 +404,17 @@ def dns_benchmark(
             for domain in domains:
                 for _ in range(samples):
                     try:
-                        # build minimal dns query
                         query = _build_dns_query(domain)
                         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-                        sock.settimeout(2.0)
-
-                        start = time.perf_counter()
-                        sock.sendto(query, (server, 53))
-                        sock.recvfrom(512)
-                        elapsed = (time.perf_counter() - start) * 1000
-                        times.append(elapsed)
-                        sock.close()
+                        try:
+                            sock.settimeout(2.0)
+                            start = time.perf_counter()
+                            sock.sendto(query, (server, 53))
+                            sock.recvfrom(512)
+                            elapsed = (time.perf_counter() - start) * 1000
+                            times.append(elapsed)
+                        finally:
+                            sock.close()
                     except Exception:
                         pass
 
@@ -471,9 +445,6 @@ def dns_benchmark(
 
 def _build_dns_query(domain: str) -> bytes:
     """build a minimal dns A record query packet."""
-    import struct
-    import os
-
     # header: id, flags(standard query), qdcount=1
     tx_id = int.from_bytes(os.urandom(2), 'big')
     header = struct.pack('>HHHHHH', tx_id, 0x0100, 1, 0, 0, 0)
@@ -513,7 +484,6 @@ def network_summary() -> Dict[str, Any]:
                 with urllib.request.urlopen(req, timeout=3) as resp:
                     body = resp.read().decode('utf-8')
                     if fmt == 'json':
-                        import json
                         public_ip = json.loads(body).get('ip')
                     else:
                         public_ip = body.strip()

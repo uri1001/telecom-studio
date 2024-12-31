@@ -34,19 +34,16 @@ def add_parity_bit(data: bytes) -> bytes:
         data: Input bytes
 
     Returns:
-        Data with parity bits added (9 bits per original byte)
+        Data with parity bytes appended (2 output bytes per input byte: original + parity byte)
     """
     result = []
 
     for byte in data:
-        # Count number of 1 bits
         ones_count = bin(byte).count('1')
-
-        # Add parity bit (1 if odd number of ones, 0 if even)
+        # 1 if odd number of ones, 0 if even
         parity = ones_count % 2
 
-        # Pack byte and parity bit
-        # Store as two bytes: original byte + parity byte (0 or 1)
+        # store as two bytes: original byte + parity byte (0 or 1)
         result.append(byte)
         result.append(parity)
 
@@ -70,7 +67,6 @@ def check_parity(data: bytes) -> bool:
         byte = data[i]
         parity = data[i + 1]
 
-        # Check if parity matches
         ones_count = bin(byte).count('1')
         expected_parity = ones_count % 2
 

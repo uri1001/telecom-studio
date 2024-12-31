@@ -11,7 +11,7 @@ import secrets
 from typing import Any, Dict, List, Optional, Tuple
 
 
-# IPv4 bogon ranges per RFC 5735/6890
+# IPv4 bogon ranges per RFC 6890 (supersedes RFC 5735)
 BOGON_RANGES = [
     '0.0.0.0/8',
     '10.0.0.0/8',

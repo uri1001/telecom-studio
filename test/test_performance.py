@@ -100,30 +100,18 @@ class TestMeasureLatency(unittest.TestCase):
     @patch('src.network.performance.time.sleep')
     @patch('src.network.performance.time.perf_counter')
     @patch('src.network.performance.socket.socket')
-    def test_bug2_bare_except_catches_keyboard_interrupt(
+    def test_keyboard_interrupt_propagates(
         self, mock_sock_cls, mock_perf, mock_sleep
     ):
-        """bug #2: bare except on line 46 catches KeyboardInterrupt silently.
-
-        The inner loop uses `except:` (bare) which catches BaseException
-        including KeyboardInterrupt, SystemExit, etc. When a socket raises
-        KeyboardInterrupt the function silently continues instead of
-        propagating the interrupt.
-        """
+        """KeyboardInterrupt should propagate, not be silently swallowed."""
         mock_sock = MagicMock()
         mock_sock.connect_ex.side_effect = KeyboardInterrupt
         mock_sock_cls.return_value = mock_sock
 
         mock_perf.side_effect = [0.0] * 40
 
-        # the function should NOT propagate KeyboardInterrupt because the
-        # bare except swallows it -- this IS the bug
-        # it will fall through with empty latencies -> icmp fallback
-        with patch('src.network.performance._measure_latency_icmp') as mock_icmp:
-            mock_icmp.return_value = {'status': 'success', 'host': 'h', 'avg_ms': 1.0}
-            result = measure_latency('example.com', samples=3)
-            # all KeyboardInterrupt got swallowed, fell through to icmp
-            mock_icmp.assert_called_once()
+        with self.assertRaises(KeyboardInterrupt):
+            measure_latency('example.com', samples=3)
 
     @patch('src.network.performance.time.sleep')
     @patch('src.network.performance.time.perf_counter')
@@ -182,14 +170,8 @@ class TestPacketLossTest(unittest.TestCase):
 
     @patch('src.network.performance.platform.system', return_value='Linux')
     @patch('src.network.performance.subprocess.run')
-    def test_bug1_timeout_value_on_linux(self, mock_run, mock_platform):
-        """bug #1: on linux, -W expects seconds but code passes milliseconds.
-
-        Line 196 converts timeout to milliseconds: str(int(timeout * 1000))
-        But the linux ping -W flag expects seconds, not milliseconds.
-        Calling packet_loss_test('host', timeout=1.0) should produce '-W 1'
-        but instead produces '-W 1000'.
-        """
+    def test_timeout_value_correct_on_linux(self, mock_run, mock_platform):
+        """on linux, -W expects seconds -- verify correct value is passed."""
         mock_run.return_value = MagicMock(
             returncode=0,
             stdout='1 packets transmitted, 1 received, 0% packet loss\n',
@@ -203,13 +185,8 @@ class TestPacketLossTest(unittest.TestCase):
         w_idx = cmd.index('-W')
         w_value = cmd[w_idx + 1]
 
-        # the bug: code passes '1000' when it should pass '1'
-        self.assertEqual(
-            w_value,
-            '1000',
-            'bug #1: packet_loss_test converts timeout to ms via int(timeout*1000) '
-            'but linux -W expects seconds, so it should be "1" not "1000"',
-        )
+        # linux -W takes seconds, so timeout=1.0 should produce '-W 1'
+        self.assertEqual(w_value, '1')
 
     @patch('src.network.performance.platform.system', return_value='Linux')
     @patch('src.network.performance.subprocess.run')

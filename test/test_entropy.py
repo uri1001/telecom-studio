@@ -68,8 +68,8 @@ class TestFileEntropy(unittest.TestCase):
             os.unlink(path)
 
     def test_file_not_found(self):
-        result = file_entropy('/nonexistent/path/file.bin')
-        self.assertEqual(result, 0.0)
+        with self.assertRaises(FileNotFoundError):
+            file_entropy('/nonexistent/path/file.bin')
 
     def test_empty_file(self):
         with tempfile.NamedTemporaryFile(delete=False) as f:
@@ -80,19 +80,18 @@ class TestFileEntropy(unittest.TestCase):
         finally:
             os.unlink(path)
 
-    def test_bug3_ambiguity(self):
-        """Bug #3: file_entropy returns 0.0 for both missing and empty files.
-        Caller cannot distinguish the two cases."""
-        missing = file_entropy('/nonexistent/file')
+    def test_missing_vs_empty_distinguishable(self):
+        """file_entropy raises on missing files, returns 0.0 on empty -- no ambiguity."""
+        with self.assertRaises(FileNotFoundError):
+            file_entropy('/nonexistent/file')
+
         with tempfile.NamedTemporaryFile(delete=False) as f:
             path = f.name
         try:
             empty = file_entropy(path)
+            self.assertEqual(empty, 0.0)
         finally:
             os.unlink(path)
-        # both return 0.0 -- this documents the ambiguity bug
-        self.assertEqual(missing, empty)
-        self.assertEqual(missing, 0.0)
 
 
 class TestIsRandom(unittest.TestCase):

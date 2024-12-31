@@ -6,13 +6,12 @@ Offline credential strength evaluation using only stdlib.
 
 import math
 import re
-import string
 import hashlib
 import os
 from typing import Dict, Any, List
 
 
-# top 100 most common passwords (subset for pattern matching)
+# common passwords for pattern matching (source: published breach lists)
 COMMON_PASSWORDS = {
     '123456', 'password', '123456789', '12345678', '12345', '1234567',
     '1234567890', 'qwerty', 'abc123', 'million', 'myspace1',

@@ -13,6 +13,9 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Dict, List, Any, Optional
 
+from src.network._utils import get_default_gateway as _get_default_gateway
+from src.network._utils import get_primary_ip as _get_primary_ip
+
 
 # ports that should typically not be exposed on a home network
 RISKY_HOME_PORTS = {
@@ -37,7 +40,7 @@ RISKY_HOME_PORTS = {
     27017: {'service': 'MongoDB', 'risk': 'critical', 'recommendation': 'never expose database ports'},
 }
 
-# common mac oui prefixes (first 3 octets) for vendor identification
+# common mac oui prefixes (first 3 octets, colon-separated) for vendor identification
 COMMON_OUI = {
     '00:50:56': 'VMware', '00:0c:29': 'VMware', '00:1c:42': 'Parallels',
     '08:00:27': 'VirtualBox', '52:54:00': 'QEMU/KVM',
@@ -62,43 +65,6 @@ COMMON_OUI = {
     '00:17:88': 'Philips Hue', '00:1f:33': 'Netgear',
     'b0:72:bf': 'TP-Link', 'e8:48:b8': 'Dell', '00:25:90': 'Dell',
 }
-
-
-def _get_default_gateway() -> Optional[str]:
-    """detect the default gateway ip."""
-    try:
-        if platform.system().lower() == 'windows':
-            result = subprocess.run(
-                ['ipconfig'], capture_output=True, text=True, timeout=5
-            )
-            for line in result.stdout.split('\n'):
-                if 'Default Gateway' in line:
-                    match = re.search(r'(\d+\.\d+\.\d+\.\d+)', line)
-                    if match:
-                        return match.group(1)
-        else:
-            result = subprocess.run(
-                ['ip', 'route', 'show', 'default'],
-                capture_output=True, text=True, timeout=5
-            )
-            match = re.search(r'default via (\d+\.\d+\.\d+\.\d+)', result.stdout)
-            if match:
-                return match.group(1)
-    except Exception:
-        pass
-    return None
-
-
-def _get_primary_ip() -> Optional[str]:
-    """get primary local ip via udp connect trick."""
-    try:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        s.connect(('8.8.8.8', 80))
-        ip = s.getsockname()[0]
-        s.close()
-        return ip
-    except Exception:
-        return None
 
 
 def _get_mac_vendor(mac: str) -> str:
@@ -167,7 +133,7 @@ def arp_table_analysis() -> Dict[str, Any]:
             'suspicious': []
         }
 
-        # duplicate MACs: same mac on multiple IPs (possible arp spoofing)
+        # same mac on multiple IPs -- may indicate arp spoofing or a gateway with multiple addresses
         for mac, ips in mac_to_ips.items():
             if len(ips) > 1:
                 anomalies['duplicate_macs'].append({

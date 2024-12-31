@@ -20,11 +20,9 @@ def calculate_entropy(data: bytes) -> float:
     if not data:
         return 0.0
 
-    # Count byte frequencies
     byte_counts = Counter(data)
     data_len = len(data)
 
-    # Calculate entropy
     entropy = 0.0
     for count in byte_counts.values():
         if count > 0:
@@ -44,16 +42,9 @@ def file_entropy(filepath: str) -> float:
     Returns:
         Entropy value (0-8 bits per byte)
     """
-    try:
-        with open(filepath, 'rb') as f:
-            data = f.read()
-        return calculate_entropy(data)
-    except FileNotFoundError:
-        print(f"Error: File '{filepath}' not found")
-        return 0.0
-    except Exception as e:
-        print(f"Error reading file: {e}")
-        return 0.0
+    with open(filepath, 'rb') as f:
+        data = f.read()
+    return calculate_entropy(data)
 
 
 def is_random(data: bytes, threshold: float = 7.0) -> bool:

@@ -14,7 +14,7 @@ import urllib.error
 from datetime import datetime
 
 
-def http_get(url, timeout=5.0):
+def http_get(url: str, timeout: float = 5.0) -> dict:
     """perform HTTP GET request with timing information."""
     try:
         start = time.perf_counter()
@@ -65,7 +65,7 @@ def http_get(url, timeout=5.0):
         }
 
 
-def https_verify(url, timeout=5.0):
+def https_verify(url: str, timeout: float = 5.0) -> dict:
     """verify HTTPS certificate and connection."""
     try:
         parsed = urllib.parse.urlparse(url)
@@ -128,7 +128,7 @@ def https_verify(url, timeout=5.0):
         }
 
 
-def check_headers_security(url, timeout=5.0):
+def check_headers_security(url: str, timeout: float = 5.0) -> dict:
     """check HTTP security headers."""
     try:
         req = urllib.request.Request(url, headers={'User-Agent': 'TelecomStudio/1.0'})

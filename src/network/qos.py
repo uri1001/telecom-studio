@@ -27,7 +27,7 @@ def estimate_mos(latency_ms: float, jitter_ms: float, packet_loss_pct: float,
     Estimate MOS using the ITU-T G.107 E-model.
 
     Args:
-        latency_ms: One-way latency in milliseconds
+        latency_ms: Round-trip latency in milliseconds
         jitter_ms: Jitter in milliseconds
         packet_loss_pct: Packet loss percentage (0-100)
         codec: Codec name (case-insensitive)
@@ -37,10 +37,11 @@ def estimate_mos(latency_ms: float, jitter_ms: float, packet_loss_pct: float,
     """
     # case-insensitive codec lookup
     profile = None
+    matched_name = codec
     for name, p in CODEC_PROFILES.items():
         if name.lower() == codec.lower():
             profile = p
-            codec = name
+            matched_name = name
             break
 
     if not profile:
@@ -52,10 +53,10 @@ def estimate_mos(latency_ms: float, jitter_ms: float, packet_loss_pct: float,
     ie_base = profile['ie']
     bpl = profile['bpl']
 
-    # effective one-way delay (half RTT + jitter buffer approximation)
+    # effective one-way delay (latency_ms is RTT, halved here + jitter buffer approximation)
     d = latency_ms / 2 + jitter_ms * 2
 
-    # delay impairment (Id) -- H(x) is the Heaviside step function
+    # delay impairment (Id) -- 177.3ms threshold from G.107 where delay becomes perceptually annoying
     Id = 0.024 * d + 0.11 * (d - 177.3) * (1 if d > 177.3 else 0)
 
     # equipment impairment (Ie-eff) -- accounts for codec + packet loss
@@ -92,7 +93,7 @@ def estimate_mos(latency_ms: float, jitter_ms: float, packet_loss_pct: float,
         'r_factor': round(R, 2),
         'mos': mos,
         'quality': quality,
-        'codec': codec,
+        'codec': matched_name,
         'effective_latency_ms': round(d, 2),
         'impairment': {
             'delay': round(Id, 2),
@@ -138,6 +139,13 @@ def voip_quality_report(host: str, codec: str = 'G.711', samples: int = 10,
     packet_loss_pct = latency_result['packet_loss']
 
     mos_result = estimate_mos(latency_ms, jitter_ms, packet_loss_pct, codec)
+
+    if mos_result['status'] == 'error':
+        return {
+            'status': 'error',
+            'host': host,
+            'error': mos_result.get('error', 'MOS estimation failed'),
+        }
 
     recommendation = _build_recommendation(
         mos_result['mos'], latency_ms, jitter_ms, packet_loss_pct

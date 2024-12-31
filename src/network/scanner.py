@@ -5,13 +5,13 @@ Simple port scanning utilities following KISS principle.
 """
 
 import socket
-import struct
+import subprocess
 import platform
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Any
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 
-# Common ports for quick scanning
+# common ports for quick scanning
 COMMON_PORTS = {
     21: 'FTP',
     22: 'SSH',
@@ -98,11 +98,11 @@ def scan_common_ports(host: str, timeout: float = 1.0) -> Dict[str, Any]:
     closed_ports = []
     errors = []
 
-    # Parallel scanning for speed
+    # parallel scanning for speed
     with ThreadPoolExecutor(max_workers=20) as executor:
         futures = {
             executor.submit(scan_port, host, port, timeout): port
-            for port in COMMON_PORTS.keys()
+            for port in COMMON_PORTS
         }
 
         for future in as_completed(futures):
@@ -149,7 +149,6 @@ def service_fingerprint(host: str, port: int, timeout: float = 2.0) -> Dict[str,
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(timeout)
 
-        # Connect to the port
         result = sock.connect_ex((host, port))
         if result != 0:
             sock.close()
@@ -160,28 +159,26 @@ def service_fingerprint(host: str, port: int, timeout: float = 2.0) -> Dict[str,
                 'error': 'Port is closed'
             }
 
-        # Try to grab banner
         banner = None
         try:
-            # Send a generic probe
+            # send protocol-appropriate probe
             if port in [80, 8080, 8443]:
                 sock.send(b"HEAD / HTTP/1.0\r\n\r\n")
             else:
                 sock.send(b"\r\n")
 
             banner = sock.recv(1024).decode('utf-8', errors='ignore').strip()
-        except:
+        except (socket.error, socket.timeout, OSError):
             pass
 
         sock.close()
 
-        # Identify service based on port and banner
         service_info = {
             'known_service': COMMON_PORTS.get(port, 'Unknown'),
-            'banner': banner if banner else None
+            'banner': banner or None
         }
 
-        # Enhanced detection based on banner
+        # detect service from banner content
         if banner:
             banner_lower = banner.lower()
             if 'ssh' in banner_lower:
@@ -231,7 +228,7 @@ def scan_network_range(network: str, port: int, timeout: float = 1.0) -> Dict[st
         hosts_up = []
         hosts_down = []
 
-        # Limit scan to /24 or smaller for performance
+        # limit scan to /24 or smaller for performance
         if net.num_addresses > 256:
             return {
                 'status': 'error',
@@ -292,10 +289,7 @@ def detect_os(host: str, timeout: float = 2.0) -> Dict[str, Any]:
         Dict with OS detection results
     """
     try:
-        # Simple OS detection based on TTL values and open ports
-        import subprocess
-
-        # Get TTL from ping
+        # ttl-based OS fingerprinting with port hints
         ttl = None
         if platform.system().lower() == 'windows':
             cmd = ['ping', '-n', '1', host]
@@ -306,14 +300,13 @@ def detect_os(host: str, timeout: float = 2.0) -> Dict[str, Any]:
 
         if result.returncode == 0:
             output = result.stdout
-            # Extract TTL
             for line in output.split('\n'):
                 if 'ttl=' in line.lower():
                     ttl_str = line.lower().split('ttl=')[1].split()[0]
                     ttl = int(ttl_str)
                     break
 
-        # OS detection based on TTL
+        # os detection based on TTL
         os_guess = 'Unknown'
         if ttl:
             if ttl <= 64:
@@ -323,7 +316,7 @@ def detect_os(host: str, timeout: float = 2.0) -> Dict[str, Any]:
             elif ttl <= 255:
                 os_guess = 'Network Device/Other'
 
-        # Check common ports for additional hints
+        # check common ports for additional hints
         port_hints = []
         test_ports = {
             22: 'SSH (Linux/Unix likely)',

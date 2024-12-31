@@ -4,13 +4,19 @@ Simple implementation following KISS principle.
 """
 
 import heapq
-from collections import Counter, defaultdict
+from collections import Counter
 
 
 class HuffmanNode:
     """Simple node for Huffman tree."""
 
-    def __init__(self, char=None, freq=0, left=None, right=None):
+    def __init__(
+        self,
+        char: str = None,
+        freq: int = 0,
+        left: 'HuffmanNode' = None,
+        right: 'HuffmanNode' = None,
+    ):
         self.char = char
         self.freq = freq
         self.left = left
@@ -20,7 +26,7 @@ class HuffmanNode:
         return self.freq < other.freq
 
 
-def build_huffman_tree(text: str) -> HuffmanNode:
+def build_huffman_tree(text: str) -> 'HuffmanNode | None':
     """
     Build Huffman tree from text.
 
@@ -28,18 +34,15 @@ def build_huffman_tree(text: str) -> HuffmanNode:
         text: Input text to compress
 
     Returns:
-        Root node of Huffman tree
+        Root node of Huffman tree, or None if text is empty
     """
-    # Count character frequencies
     frequency = Counter(text)
 
-    # Create leaf nodes
     heap = []
     for char, freq in frequency.items():
         node = HuffmanNode(char=char, freq=freq)
         heapq.heappush(heap, node)
 
-    # Build tree
     while len(heap) > 1:
         left = heapq.heappop(heap)
         right = heapq.heappop(heap)
@@ -50,7 +53,7 @@ def build_huffman_tree(text: str) -> HuffmanNode:
     return heap[0] if heap else None
 
 
-def generate_codes(root: HuffmanNode) -> dict:
+def generate_codes(root: HuffmanNode) -> dict[str, str]:
     """
     Generate Huffman codes from tree.
 
@@ -67,7 +70,6 @@ def generate_codes(root: HuffmanNode) -> dict:
 
     def traverse(node, code=""):
         if node:
-            # Leaf node
             if node.char is not None:
                 codes[node.char] = code if code else "0"
             else:
@@ -78,7 +80,7 @@ def generate_codes(root: HuffmanNode) -> dict:
     return codes
 
 
-def huffman_encode(text: str) -> tuple:
+def huffman_encode(text: str) -> tuple[str, dict[str, str]]:
     """
     Encode text using Huffman coding.
 
@@ -91,23 +93,20 @@ def huffman_encode(text: str) -> tuple:
     if not text:
         return "", {}
 
-    # Special case: single character
+    # single character: no tree needed
     if len(set(text)) == 1:
         codes = {text[0]: "0"}
         encoded = "0" * len(text)
         return encoded, codes
 
-    # Build tree and generate codes
     root = build_huffman_tree(text)
     codes = generate_codes(root)
-
-    # Encode text
     encoded = "".join(codes[char] for char in text)
 
     return encoded, codes
 
 
-def huffman_decode(encoded: str, codes: dict) -> str:
+def huffman_decode(encoded: str, codes: dict[str, str]) -> str:
     """
     Decode Huffman encoded data.
 
@@ -117,11 +116,13 @@ def huffman_decode(encoded: str, codes: dict) -> str:
 
     Returns:
         Decoded text
+
+    Raises:
+        ValueError: If encoded data has trailing bits that don't match any code
     """
     if not encoded or not codes:
         return ""
 
-    # Reverse the codes dictionary
     decode_dict = {code: char for char, code in codes.items()}
 
     decoded = []
@@ -132,6 +133,9 @@ def huffman_decode(encoded: str, codes: dict) -> str:
         if current_code in decode_dict:
             decoded.append(decode_dict[current_code])
             current_code = ""
+
+    if current_code:
+        raise ValueError(f"invalid encoded data: trailing bits '{current_code}'")
 
     return "".join(decoded)
 
@@ -145,7 +149,7 @@ def compression_ratio(original: bytes, compressed: bytes) -> float:
         compressed: Compressed data
 
     Returns:
-        Compression ratio (1.0 = no compression, higher = better)
+        Compression ratio (>1.0 = data compressed, <1.0 = data expanded, 1.0 = no change)
     """
     if not compressed:
         return 0.0
@@ -153,7 +157,7 @@ def compression_ratio(original: bytes, compressed: bytes) -> float:
     return len(original) / len(compressed)
 
 
-def encode_to_bytes(encoded: str) -> bytes:
+def encode_to_bytes(encoded: str) -> tuple[bytes, int]:
     """
     Convert binary string to bytes.
 
@@ -161,20 +165,20 @@ def encode_to_bytes(encoded: str) -> bytes:
         encoded: Binary string
 
     Returns:
-        Packed bytes
+        Tuple of (packed bytes, number of padding bits added)
     """
-    # Pad to multiple of 8
+    # pad to multiple of 8
     padding = 8 - (len(encoded) % 8)
-    if padding != 8:
-        encoded = encoded + "0" * padding
+    if padding == 8:
+        padding = 0
+    padded = encoded + "0" * padding
 
-    # Convert to bytes
     result = []
-    for i in range(0, len(encoded), 8):
-        byte = int(encoded[i:i+8], 2)
+    for i in range(0, len(padded), 8):
+        byte = int(padded[i:i+8], 2)
         result.append(byte)
 
-    return bytes(result)
+    return bytes(result), padding
 
 
 # Simple test
@@ -195,7 +199,7 @@ if __name__ == "__main__":
 
         # Encode
         encoded, codes = huffman_encode(text)
-        encoded_bytes = encode_to_bytes(encoded)
+        encoded_bytes, _padding = encode_to_bytes(encoded)
 
         print(f"  Encoded bits: {len(encoded)}")
         print(f"  Encoded bytes: {len(encoded_bytes)}")
